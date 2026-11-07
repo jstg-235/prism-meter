@@ -7,7 +7,7 @@ correct the gap automatically, by hand, or as suggestions.
 This is **Phase 1: core meters**. See the [spec](https://claude.ai/artifact/K6EhT6acdUzaH19fegY468)
 for the full plan.
 
-![Prism Meter, Phase 1](docs/images/prism-meter-phase1.png)
+![Prism Meter](docs/images/prism-meter-layout.png)
 
 ## What Phase 1 measures
 
@@ -19,8 +19,14 @@ for the full plan.
 | PPM | EBU, BBC (Type II) and DIN, Nordic (Type I) ballistics |
 | K-System | AES17 RMS on K-20, K-14, K-12 scales |
 | Peak + average | Dual-needle gauge (our design): peak and RMS needles on one scale, crest factor readout |
-| Spectrum | 8192-point FFT, log frequency, averaging, peak hold, 4.5 dB/oct tilt |
-| Stereo | Correlation, balance, width |
+| Spectrum | 8192-point FFT, log frequency, averaging, peak hold, 4.5 dB/oct tilt, frequency-coloured trace |
+| Spectrogram | Scrolling time vs frequency heat map under the spectrum |
+| Phase | Vectorscope (mid/side) with phosphor persistence, correlation, balance, width |
+| Loudness history | Last 60 s of short-term and momentary loudness against the target band |
+
+Each tool has its own accent colour (loudness amber, spectrum sky, phase violet,
+VU green, PPM orange, K-System blue), and level meters use segmented
+green / yellow / red bars.
 
 Loudness targets: -14 LUFS streaming, -16 podcast, -23 EBU R128, -24 ATSC A/85, with a
 true-peak ceiling of -0.1, -1 or -2 dBTP.

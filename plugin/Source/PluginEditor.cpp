@@ -12,7 +12,7 @@ namespace
 PrismMeterEditor::PrismMeterEditor (PrismMeterProcessor& p)
     : AudioProcessorEditor (&p), processor (p)
 {
-    for (auto* c : std::initializer_list<juce::Component*> { &loudnessPanel, &spectrum, &stereoPanel, &needleGauge,
+    for (auto* c : std::initializer_list<juce::Component*> { &loudnessPanel, &spectrum, &phasePanel, &needleGauge,
                                                              &vuBank, &ppmBank, &kBank, &resetButton, &tiltButton })
         addAndMakeVisible (c);
 
@@ -27,9 +27,14 @@ PrismMeterEditor::PrismMeterEditor (PrismMeterProcessor& p)
     {
         processor.requestReset();
         spectrum.resetPeakHold();
+        loudnessPanel.clearHistory();
     };
 
     tiltButton.setToggleState (true, juce::dontSendNotification);
+    tiltButton.setColour (juce::ToggleButton::tickColourId, Theme::spectrumAccent);
+    tiltButton.setColour (juce::ToggleButton::textColourId, Theme::textSecondary);
+    resetButton.setColour (juce::TextButton::buttonColourId, Theme::face);
+    resetButton.setColour (juce::TextButton::textColourOffId, Theme::loudnessAccent);
     tiltButton.onClick = [this] { spectrum.setTiltEnabled (tiltButton.getToggleState()); };
 
     for (auto* bank : { &vuBank, &ppmBank, &kBank })
@@ -39,8 +44,8 @@ PrismMeterEditor::PrismMeterEditor (PrismMeterProcessor& p)
     }
 
     setResizable (true, true);
-    setResizeLimits (1120, 600, 2400, 1400);
-    setSize (1180, 680);
+    setResizeLimits (1180, 700, 2600, 1600);
+    setSize (1280, 780);
 
     updateScales();
     startTimerHz (30);
@@ -57,7 +62,8 @@ void PrismMeterEditor::setUpCombo (LabelledCombo& c, const juce::String& name, c
     c.label.setJustificationType (juce::Justification::centredRight);
     c.label.setColour (juce::Label::textColourId, Theme::textSecondary);
     c.box.addItemList (items, 1);
-    c.box.setColour (juce::ComboBox::backgroundColourId, Theme::panel);
+    c.box.setColour (juce::ComboBox::backgroundColourId, Theme::face);
+    c.box.setColour (juce::ComboBox::arrowColourId, Theme::textSecondary);
     c.box.setColour (juce::ComboBox::outlineColourId, Theme::panelEdge);
     c.box.setColour (juce::ComboBox::textColourId, Theme::textPrimary);
     addAndMakeVisible (c.label);
@@ -146,7 +152,26 @@ void PrismMeterEditor::timerCallback()
     r.truePeakCeiling = Choices::truePeakCeilingValues[static_cast<size_t> (choiceIndex (params, ParamIds::truePeakCeiling))];
     loudnessPanel.setReadings (r);
 
-    stereoPanel.setValues (s.correlation.load(), s.balanceDb.load(), s.width.load());
+    phasePanel.setValues (s.correlation.load(), s.balanceDb.load(), s.width.load());
+
+    // 10 Hz history for the loudness graph
+    if (++tickCount % 3 == 0)
+        loudnessPanel.pushHistory (r.shortTerm, r.momentary);
+
+    // Vectorscope: draw only the newest samples, discard the backlog.
+    {
+        int n = 0;
+        for (;;)
+        {
+            const int got = processor.readScopeSamples (scopeLeft.data(), scopeRight.data(), static_cast<int> (scopeLeft.size()));
+            if (got <= 0)
+                break;
+            n = got;
+        }
+        if (n > 0)
+            phasePanel.pushSamples (scopeLeft.data(), scopeRight.data(), juce::jmin (n, 1600));
+        phasePanel.repaint();
+    }
 
     const double sr = processor.getCurrentSampleRate();
     if (! juce::exactlyEqual (sr, lastSampleRate))
@@ -171,19 +196,31 @@ void PrismMeterEditor::paint (juce::Graphics& g)
     g.fillAll (Theme::background);
 
     auto header = getLocalBounds().removeFromTop (44).reduced (14, 0);
-    g.setColour (Theme::textPrimary);
-    g.setFont (Theme::font (18.0f, true));
-    g.drawText ("PRISM", header.removeFromLeft (70), juce::Justification::centredLeft);
-    g.setColour (Theme::signal);
+    // Wordmark: each letter of PRISM in one of the tool colours.
+    const juce::Colour letters[] = { Theme::loudnessAccent, Theme::spectrumAccent, Theme::phaseAccent, Theme::vuAccent, Theme::ppmAccent };
+    const juce::String word ("PRISM");
+    g.setFont (Theme::font (20.0f, true));
+    for (int i = 0; i < word.length(); ++i)
+    {
+        g.setColour (letters[i]);
+        const auto letter = word.substring (i, i + 1);
+        const int w = juce::roundToInt (juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), letter)) + 1;
+        g.drawText (letter, header.removeFromLeft (w), juce::Justification::centredLeft);
+    }
+    header.removeFromLeft (6);
+    g.setColour (Theme::textSecondary);
     g.setFont (Theme::font (18.0f));
     g.drawText ("meter", header.removeFromLeft (70), juce::Justification::centredLeft);
+
+    g.setColour (Theme::panelEdge);
+    g.drawHorizontalLine (43, 0.0f, static_cast<float> (getWidth()));
 }
 
 void PrismMeterEditor::resized()
 {
     auto area = getLocalBounds();
     auto header = area.removeFromTop (44).reduced (14, 8);
-    header.removeFromLeft (150);
+    header.removeFromLeft (160);
 
     resetButton.setBounds (header.removeFromRight (70));
     header.removeFromRight (8);
@@ -205,23 +242,25 @@ void PrismMeterEditor::resized()
     area = area.reduced (10);
     constexpr int gap = 10;
 
-    auto left = area.removeFromLeft (juce::jmax (280, area.getWidth() / 4));
+    // Left: loudness (top), analogue peak + average gauge (bottom)
+    auto left = area.removeFromLeft (juce::jmax (310, area.getWidth() / 4));
     area.removeFromLeft (gap);
-    auto right = area.removeFromRight (juce::jmax (330, area.getWidth() * 3 / 10));
-    area.removeFromRight (gap);
-
-    loudnessPanel.setBounds (left.removeFromTop (juce::jmin (left.getHeight(), 330)));
+    loudnessPanel.setBounds (left.removeFromTop (left.getHeight() * 62 / 100));
     left.removeFromTop (gap);
     needleGauge.setBounds (left);
 
-    stereoPanel.setBounds (area.removeFromBottom (86));
-    area.removeFromBottom (gap);
-    spectrum.setBounds (area);
-
+    // Right: three segmented meter banks
+    auto right = area.removeFromRight (juce::jmax (330, area.getWidth() * 3 / 10));
+    area.removeFromRight (gap);
     const int bankWidth = (right.getWidth() - 2 * gap) / 3;
     vuBank.setBounds (right.removeFromLeft (bankWidth));
     right.removeFromLeft (gap);
     ppmBank.setBounds (right.removeFromLeft (bankWidth));
     right.removeFromLeft (gap);
     kBank.setBounds (right);
+
+    // Centre: spectrum + spectrogram, phase / vectorscope below
+    phasePanel.setBounds (area.removeFromBottom (juce::jmax (190, area.getHeight() * 30 / 100)));
+    area.removeFromBottom (gap);
+    spectrum.setBounds (area);
 }

@@ -2,6 +2,7 @@
 
 #include "PluginProcessor.h"
 #include "ui/MeterViews.h"
+#include "ui/Theme.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -32,17 +33,19 @@ private:
 
     LoudnessPanel loudnessPanel;
     SpectrumView spectrum;
-    StereoPanel stereoPanel;
+    PhasePanel phasePanel;
     NeedleGauge needleGauge;
-    BarMeterBank vuBank { "VU", 2 };
-    BarMeterBank ppmBank { "PPM", 2 };
-    BarMeterBank kBank { "K-System", 2 };
+    BarMeterBank vuBank { "VU", Theme::vuAccent, 2 };
+    BarMeterBank ppmBank { "PPM", Theme::ppmAccent, 2 };
+    BarMeterBank kBank { "K-System", Theme::kAccent, 2 };
 
     juce::TextButton resetButton { "Reset" };
     juce::ToggleButton tiltButton { "Tilt" };
     LabelledCombo targetCombo, ceilingCombo, vuCombo, ppmCombo, kCombo;
 
     std::vector<float> spectrumScratch = std::vector<float> (8192);
+    std::vector<float> scopeLeft = std::vector<float> (4096), scopeRight = std::vector<float> (4096);
+    int tickCount = 0;
     double lastSampleRate = 0.0;
     int lastVuChoice = -1, lastPpmChoice = -1, lastKChoice = -1;
 

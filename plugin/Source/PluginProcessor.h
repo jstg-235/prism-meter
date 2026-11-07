@@ -84,8 +84,12 @@ public:
     int readSpectrumSamples (float* dest, int maxSamples) noexcept;
     double getCurrentSampleRate() const noexcept { return currentSampleRate.load(); }
 
+    /// Left/right sample pairs for the vectorscope. Same threading rules as the spectrum FIFO.
+    int readScopeSamples (float* left, float* right, int maxSamples) noexcept;
+
 private:
     void pushSpectrumSamples (const float* const* channels, int numChannels, int numSamples) noexcept;
+    void pushScopeSamples (const float* const* channels, int numChannels, int numSamples) noexcept;
     void publishReadings (int numChannels) noexcept;
 
     juce::AudioProcessorValueTreeState parameters;
@@ -108,6 +112,11 @@ private:
     juce::AbstractFifo spectrumFifo { spectrumFifoSize };
     std::vector<float> spectrumBuffer = std::vector<float> (spectrumFifoSize, 0.0f);
     std::vector<float> monoScratch;
+
+    static constexpr int scopeFifoSize = 1 << 14;
+    juce::AbstractFifo scopeFifo { scopeFifoSize };
+    std::vector<float> scopeLeft = std::vector<float> (scopeFifoSize, 0.0f);
+    std::vector<float> scopeRight = std::vector<float> (scopeFifoSize, 0.0f);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PrismMeterProcessor)
 };

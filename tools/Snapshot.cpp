@@ -39,14 +39,16 @@ int main (int argc, char** argv)
             for (int i = 0; i < blockSize; ++i, ++sampleIndex)
             {
                 const float common = noise (rng);
-                lpL += 0.05f * (0.8f * common + 0.2f * noise (rng) - lpL);
-                lpR += 0.05f * (0.8f * common + 0.2f * noise (rng) - lpR);
+                lpL += 0.05f * (0.7f * common + 0.3f * noise (rng) - lpL);
+                lpR += 0.05f * (0.7f * common + 0.3f * noise (rng) - lpR);
 
                 const double t = static_cast<double> (sampleIndex % 24000) / sampleRate;
                 const auto kick = static_cast<float> (0.5 * std::exp (-t * 18.0) * std::sin (2.0 * juce::MathConstants<double>::pi * 60.0 * t));
 
-                buffer.setSample (0, i, 0.55f * lpL + kick);
-                buffer.setSample (1, i, 0.55f * lpR + kick);
+                // Slow swell so the loudness history has some movement.
+                const auto swell = static_cast<float> (0.75 + 0.25 * std::sin (2.0 * juce::MathConstants<double>::pi * static_cast<double> (sampleIndex) / (sampleRate * 7.0)));
+                buffer.setSample (0, i, swell * (0.55f * lpL + kick));
+                buffer.setSample (1, i, swell * (0.55f * lpR + kick));
             }
             processor.processBlock (buffer, midi);
         }
@@ -57,9 +59,9 @@ int main (int argc, char** argv)
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
 
     // Keep audio flowing while the editor's timer drains the spectrum FIFO.
-    for (int tick = 0; tick < 40; ++tick)
+    for (int tick = 0; tick < 450; ++tick)
     {
-        renderSeconds (0.05);
+        renderSeconds (1.0 / 30.0);
         juce::MessageManager::getInstance()->runDispatchLoopUntil (34);
     }
 
