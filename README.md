@@ -1,6 +1,6 @@
-# Prism Meter
+# New Constellation Prism Meter
 
-An all-in-one audio metering plugin that will grow into a tonal-matching and
+**Prism Meter** by **New Constellation**: an all-in-one audio metering plugin that will grow into a tonal-matching and
 correction tool: measure everything, capture the signature of a reference, and
 correct the gap automatically, by hand, or as suggestions.
 
@@ -46,8 +46,12 @@ spectrum through a lock-free FIFO.
 
 ## Building
 
-Requires CMake 3.22+ and a C++20 compiler. JUCE 8.0.9 and GoogleTest 1.15.2 are
-downloaded at configure time.
+Prism Meter targets **macOS** (universal binary, Apple silicon and Intel, macOS
+10.13+) as **VST3 and AU**. AAX comes at the end of the roadmap. Linux builds
+are kept working for development and tests only.
+
+Requires CMake 3.22+ and a C++20 compiler (Xcode 15+ on macOS). JUCE 8.0.9 and
+GoogleTest 1.15.2 are downloaded at configure time.
 
 ```sh
 # Core library and tests only (fast)
@@ -55,18 +59,28 @@ cmake -S . -B build -DPRISM_BUILD_PLUGIN=OFF
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 
-# Plugin (VST3 + Standalone, plus AU on macOS)
+# Plugin (VST3 + AU + Standalone on macOS)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel
+
+# Check the AU with Apple's validator
+cp -R "build/plugin/PrismMeter_artefacts/Release/AU/Prism Meter.component" ~/Library/Audio/Plug-Ins/Components/
+auval -v aufx PrMt NwCn
 ```
+
+Plugin identity: manufacturer "New Constellation" (code `NwCn`), product
+"Prism Meter" (code `PrMt`), bundle ID `com.newconstellation.prismmeter`.
+These codes are saved in users' sessions, so don't change them after release.
 
 Options:
 
 - `PRISM_JUCE_DIR=/path/to/JUCE` uses a local JUCE checkout instead of downloading.
-- `PRISM_AAX_SDK=/path/to/aax-sdk` adds the AAX format (needs an Avid developer account; release builds need PACE signing).
+- `PRISM_AAX_SDK=/path/to/aax-sdk` adds the AAX format early (planned for later; needs an Avid developer account and PACE signing).
 - `PRISM_BUILD_SNAPSHOT_TOOL=ON` builds `PrismSnapshot`.
 
-On Linux install the JUCE dependencies first, as listed in `.github/workflows/ci.yml`.
+On Linux (development only) install the JUCE dependencies first: `libasound2-dev
+libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev libxinerama-dev
+libxcursor-dev libxcomposite-dev libxext-dev libgl1-mesa-dev`.
 
 ## Standards and clean-room approach
 
@@ -83,5 +97,7 @@ are copied. Where the standards leave room, the choices are ours and are marked
 
 ## Licensing
 
-Not decided yet. JUCE 8 is dual-licensed (AGPLv3 or a commercial JUCE licence);
-pick one before distributing builds.
+New Constellation uses JUCE under its free licence tier. That tier has a revenue
+limit and its own terms, so check the current terms at juce.com before
+releasing, and move to a paid JUCE licence if the limit is reached. Release
+builds for macOS also need a Developer ID signature and notarization.

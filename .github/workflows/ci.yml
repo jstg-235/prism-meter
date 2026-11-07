@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
+        os: [ubuntu-24.04, macos-14]
     steps:
       - uses: actions/checkout@v4
       - name: Configure
@@ -22,29 +22,26 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
 
+  # The product ships on macOS only for now (VST3 + AU, universal binary).
   plugin:
-    name: Plugin build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
+    name: Plugin build (macOS universal)
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev \
-            libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev libxext-dev libgl1-mesa-dev
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPRISM_BUILD_TESTS=OFF
       - name: Build
         run: cmake --build build --config Release --parallel
+      - name: Validate AU
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "build/plugin/PrismMeter_artefacts/Release/AU/Prism Meter.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          auval -v aufx PrMt NwCn
       - name: Upload plugin
         uses: actions/upload-artifact@v4
         with:
-          name: PrismMeter-${{ runner.os }}
+          name: PrismMeter-macOS
           path: |
             build/plugin/PrismMeter_artefacts/Release/VST3
             build/plugin/PrismMeter_artefacts/Release/AU

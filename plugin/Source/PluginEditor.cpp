@@ -196,10 +196,18 @@ void PrismMeterEditor::paint (juce::Graphics& g)
     g.fillAll (Theme::background);
 
     auto header = getLocalBounds().removeFromTop (44).reduced (14, 0);
+
+    // Brand line above the product wordmark.
+    auto brand = header.removeFromTop (15).withTrimmedTop (4);
+    g.setColour (Theme::textSecondary);
+    g.setFont (Theme::font (9.0f, true).withExtraKerningFactor (0.18f));
+    g.drawText ("NEW CONSTELLATION", brand, juce::Justification::centredLeft);
+    header = header.withTrimmedBottom (3);
+
     // Wordmark: each letter of PRISM in one of the tool colours.
     const juce::Colour letters[] = { Theme::loudnessAccent, Theme::spectrumAccent, Theme::phaseAccent, Theme::vuAccent, Theme::ppmAccent };
     const juce::String word ("PRISM");
-    g.setFont (Theme::font (20.0f, true));
+    g.setFont (Theme::font (19.0f, true));
     for (int i = 0; i < word.length(); ++i)
     {
         g.setColour (letters[i]);
@@ -209,7 +217,7 @@ void PrismMeterEditor::paint (juce::Graphics& g)
     }
     header.removeFromLeft (6);
     g.setColour (Theme::textSecondary);
-    g.setFont (Theme::font (18.0f));
+    g.setFont (Theme::font (17.0f));
     g.drawText ("meter", header.removeFromLeft (70), juce::Justification::centredLeft);
 
     g.setColour (Theme::panelEdge);
