@@ -1,0 +1,90 @@
+name: macOS build
+
+# Builds an installable, universal (Apple silicon + Intel) macOS build of
+# Prism Meter: a .pkg installer (AU + VST3) and a .zip (AU, VST3, Standalone).
+#
+# - Pull requests check that packaging works.
+# - Every push to main: the files are attached to the run as an artifact.
+# - "Run workflow" button (Actions tab): same, and tick "Publish" to also put
+#   them on the Releases page as a pre-release test build.
+# - Pushing a tag like v0.1.0: published as a normal release.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish as a pre-release on the Releases page
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and package (macOS universal)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: ver
+        run: |
+          base=$(sed -nE 's/^project\(PrismMeter VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            tag="$GITHUB_REF_NAME"
+          else
+            version="$base-test.$GITHUB_RUN_NUMBER"
+            tag="test-$base-$GITHUB_RUN_NUMBER"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Version $version"
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPRISM_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package (.pkg and .zip)
+        run: tools/package_macos.sh build "${{ steps.ver.outputs.version }}" dist
+
+      - name: Test the installer
+        run: |
+          sudo installer -pkg dist/*.pkg -target /
+          ls -la "/Library/Audio/Plug-Ins/Components/Prism Meter.component" \
+                 "/Library/Audio/Plug-Ins/VST3/Prism Meter.vst3"
+          killall -9 AudioComponentRegistrar || true
+          auval -v aufx PrMt NwCn
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrismMeter-${{ steps.ver.outputs.version }}-macOS
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish release
+        if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          flags=()
+          [[ "$GITHUB_REF_TYPE" == "tag" ]] || flags+=(--prerelease)
+          gh release create "$TAG" dist/* \
+            --target "$GITHUB_SHA" \
+            --title "Prism Meter $VERSION (macOS)" \
+            --notes-file docs/INSTALL-macOS.md \
+            "${flags[@]}"
