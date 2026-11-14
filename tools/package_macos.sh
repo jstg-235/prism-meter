@@ -38,6 +38,7 @@ done
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$OUT_DIR"
+OUT_DIR=$(cd "$OUT_DIR" && pwd)
 
 # ---- .pkg installer -------------------------------------------------------
 STAGE="$WORK/pkgroot/Library/Audio/Plug-Ins"
@@ -99,6 +100,7 @@ ditto "$VST3" "$Z/Prism Meter.vst3"
 ditto "$APP" "$Z/Prism Meter.app"
 cp "$ROOT/docs/INSTALL-macOS.md" "$Z/INSTALL.md"
 (cd "$WORK/zip" && ditto -c -k --keepParent "$NAME" "$OUT_DIR/$NAME.zip")
+[[ -f "$OUT_DIR/$NAME.zip" ]] || { echo "zip was not written" >&2; exit 1; }
 
 echo "Packaged:"
 ls -lh "$OUT_DIR"
