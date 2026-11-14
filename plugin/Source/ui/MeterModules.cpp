@@ -259,8 +259,8 @@ namespace
     };
 
     //==========================================================================
-    /// Analogue VU meters: round-scale faces in roomy slots, edgewise faces
-    /// in narrow ones (the view picks).
+    /// Analogue VU meters: round-scale faces, side by side or stacked
+    /// (the view picks whichever gives bigger meters).
     class VuModule final : public ViewModule<AnalogVuMeter>
     {
     public:

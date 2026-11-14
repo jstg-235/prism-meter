@@ -114,11 +114,12 @@ namespace DisplayPresets
         static const std::vector<DisplayPreset> presets {
             { "console", "Console (full)", "Every meter on one screen, for a main studio display.",
               1280, 780,
-              { 1.0f, 1.75f, 0.4f, 0.4f, 0.4f },
-              { 0.62f, 0.08f, 0.30f },
-              { { 0, 0, 1, 1, K::loudness }, { 0, 1, 1, 2, K::peakAverage },
-                { 1, 0, 1, 2, K::spectrum }, { 1, 2, 1, 1, K::phase },
-                { 2, 0, 1, 3, K::vu }, { 3, 0, 1, 3, K::ppm }, { 4, 0, 1, 3, K::kSystem } } },
+              { 1.0f, 1.55f, 0.5f, 0.5f },
+              { 0.50f, 0.12f, 0.08f, 0.30f },
+              { { 0, 0, 1, 2, K::loudness }, { 0, 2, 1, 2, K::peakAverage },
+                { 1, 0, 1, 3, K::spectrum }, { 1, 3, 1, 1, K::phase },
+                { 2, 0, 1, 1, K::ppm }, { 3, 0, 1, 1, K::kSystem },
+                { 2, 1, 2, 3, K::vu } } },
 
             { "wide12-stereo", "12\" widescreen: stereo Peak + Average", "One large stereo dual-needle meter, L and R side by side.",
               1280, 720,
