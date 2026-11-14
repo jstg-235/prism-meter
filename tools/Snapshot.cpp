@@ -1,5 +1,7 @@
 // Renders the editor to a PNG after feeding it a synthetic programme signal.
-// Developer tool for docs and visual checks: PrismSnapshot <output.png>
+// Developer tool for docs and visual checks:
+//   PrismSnapshot <output.png>            current layout
+//   PrismSnapshot --all-presets <dir>     one PNG per display preset
 
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
@@ -12,8 +14,10 @@ int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI gui;
 
-    const juce::File output (argc > 1 ? juce::File::getCurrentWorkingDirectory().getChildFile (argv[1])
-                                      : juce::File::getCurrentWorkingDirectory().getChildFile ("prism-meter.png"));
+    const auto cwd = juce::File::getCurrentWorkingDirectory();
+    const bool allPresets = argc > 1 && juce::String (argv[1]) == "--all-presets";
+    const juce::File output = allPresets ? cwd.getChildFile (argc > 2 ? argv[2] : "presets")
+                                         : cwd.getChildFile (argc > 1 ? argv[1] : "prism-meter.png");
 
     constexpr double sampleRate = 48000.0;
     constexpr int blockSize = 512;
@@ -57,21 +61,41 @@ int main (int argc, char** argv)
     renderSeconds (12.0);
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    auto* prism = dynamic_cast<PrismMeterEditor*> (editor.get());
 
-    // Keep audio flowing while the editor's timer drains the spectrum FIFO.
-    for (int tick = 0; tick < 450; ++tick)
+    // Keep audio flowing while the editor's timer drains the analyser FIFOs.
+    auto run = [&] (int ticks)
     {
-        renderSeconds (1.0 / 30.0);
-        juce::MessageManager::getInstance()->runDispatchLoopUntil (34);
+        for (int tick = 0; tick < ticks; ++tick)
+        {
+            renderSeconds (1.0 / 30.0);
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (34);
+        }
+    };
+
+    auto save = [&] (const juce::File& file)
+    {
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, editor->getWidth() > 1500 ? 1.5f : 2.0f);
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+        juce::FileOutputStream stream (file);
+        juce::PNGImageFormat png;
+        return stream.openedOk() && png.writeImageToStream (image, stream);
+    };
+
+    if (! allPresets)
+    {
+        run (450);
+        return save (output) ? 0 : 1;
     }
 
-    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
-    juce::FileOutputStream stream (output);
-    if (! stream.openedOk())
-        return 1;
+    for (const auto& preset : DisplayPresets::all())
+    {
+        prism->applyPreset (preset.id);
+        run (300);
+        if (! save (output.getChildFile (preset.id + ".png")))
+            return 1;
+    }
 
-    stream.setPosition (0);
-    stream.truncate();
-    juce::PNGImageFormat png;
-    return png.writeImageToStream (image, stream) ? 0 : 1;
+    return 0;
 }

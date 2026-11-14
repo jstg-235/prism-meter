@@ -158,6 +158,9 @@ void LoudnessPanel::paint (juce::Graphics& g)
     auto area = Theme::drawPanel (g, getLocalBounds().toFloat(), "Loudness  LUFS", Theme::loudnessAccent).reduced (8.0f);
     const auto& r = readings;
 
+    // Readouts grow on large slots so the numbers read from across the room.
+    const float k = juce::jlimit (1.0f, 2.4f, juce::jmin (area.getWidth() / 300.0f, area.getHeight() / 520.0f));
+
     auto colourForLoudness = [&] (float lufs)
     {
         if (! std::isfinite (lufs) || lufs <= -149.0f)
@@ -167,16 +170,16 @@ void LoudnessPanel::paint (juce::Graphics& g)
     };
 
     // Integrated, large
-    auto hero = area.removeFromTop (58.0f);
+    auto hero = area.removeFromTop (58.0f * k);
     Theme::drawFace (g, hero);
     {
         auto inner = hero.reduced (8.0f, 4.0f);
         auto captionCol = inner.removeFromRight (inner.getWidth() * 0.36f);
         g.setColour (colourForLoudness (r.integrated));
-        g.setFont (Theme::mono (36.0f, true));
+        g.setFont (Theme::mono (36.0f * k, true));
         g.drawText (Theme::formatDb (r.integrated), inner, juce::Justification::centredLeft);
         g.setColour (Theme::loudnessAccent);
-        g.setFont (Theme::font (10.0f, true));
+        g.setFont (Theme::font (10.0f * juce::jmin (k, 1.6f), true));
         g.drawText ("INTEGRATED", captionCol.removeFromTop (captionCol.getHeight() * 0.5f), juce::Justification::bottomRight);
         g.setColour (Theme::textSecondary);
         g.drawText ("TARGET " + juce::String (r.target, 0), captionCol, juce::Justification::topRight);
@@ -185,18 +188,18 @@ void LoudnessPanel::paint (juce::Graphics& g)
     area.removeFromTop (6.0f);
 
     // 2 x 2 readouts
-    auto grid = area.removeFromTop (84.0f);
+    auto grid = area.removeFromTop (84.0f * k);
     const float cellW = (grid.getWidth() - 6.0f) * 0.5f;
-    auto rowA = grid.removeFromTop (39.0f);
+    auto rowA = grid.removeFromTop (39.0f * k);
     grid.removeFromTop (6.0f);
     auto rowB = grid;
 
     const bool tpOver = r.truePeakMax > r.truePeakCeiling;
-    Theme::drawReadout (g, rowA.removeFromLeft (cellW), "Momentary", Theme::formatDb (r.momentary), colourForLoudness (r.momentary));
-    Theme::drawReadout (g, rowA.withTrimmedLeft (6.0f), "Short-term", Theme::formatDb (r.shortTerm), colourForLoudness (r.shortTerm));
-    Theme::drawReadout (g, rowB.removeFromLeft (cellW), "Range LU", juce::String (r.loudnessRange, 1), Theme::loudnessAccent);
+    Theme::drawReadout (g, rowA.removeFromLeft (cellW), "Momentary", Theme::formatDb (r.momentary), colourForLoudness (r.momentary), 18.0f * k);
+    Theme::drawReadout (g, rowA.withTrimmedLeft (6.0f), "Short-term", Theme::formatDb (r.shortTerm), colourForLoudness (r.shortTerm), 18.0f * k);
+    Theme::drawReadout (g, rowB.removeFromLeft (cellW), "Range LU", juce::String (r.loudnessRange, 1), Theme::loudnessAccent, 18.0f * k);
     Theme::drawReadout (g, rowB.withTrimmedLeft (6.0f), "True peak dBTP", Theme::formatDb (r.truePeakMax),
-                        tpOver ? Theme::levelRed : Theme::levelGreen);
+                        tpOver ? Theme::levelRed : Theme::levelGreen, 18.0f * k);
 
     area.removeFromTop (6.0f);
 
@@ -241,14 +244,14 @@ void LoudnessPanel::paint (juce::Graphics& g)
         const int first = (historyWrite - historyCount + historyLength) % historyLength;
         const float x0 = plot.getRight() - static_cast<float> (historyCount - 1) * dx;
 
-        for (int k = 0; k < historyCount; ++k)
+        for (int i = 0; i < historyCount; ++i)
         {
-            const auto idx = static_cast<size_t> ((first + k) % historyLength);
-            const float x = x0 + static_cast<float> (k) * dx;
+            const auto idx = static_cast<size_t> ((first + i) % historyLength);
+            const float x = x0 + static_cast<float> (i) * dx;
             const float ys = yFor (std::isfinite (shortHistory[idx]) ? shortHistory[idx] : lo);
             const float ym = yFor (std::isfinite (momentaryHistory[idx]) ? momentaryHistory[idx] : lo);
 
-            if (k == 0)
+            if (i == 0)
             {
                 shortPath.startNewSubPath (x, ys);
                 momentaryPath.startNewSubPath (x, ym);
@@ -282,30 +285,70 @@ void LoudnessPanel::paint (juce::Graphics& g)
 //==============================================================================
 void NeedleGauge::setValues (float peakDb, float averageDb)
 {
-    peak = peakDb;
-    average = averageDb;
+    stereo = false;
+    peak[0] = peak[1] = peakDb;
+    average[0] = average[1] = averageDb;
+    repaint();
+}
+
+void NeedleGauge::setStereoValues (float peakL, float averageL, float peakR, float averageR)
+{
+    stereo = true;
+    peak[0] = peakL;
+    average[0] = averageL;
+    peak[1] = peakR;
+    average[1] = averageR;
     repaint();
 }
 
 void NeedleGauge::paint (juce::Graphics& g)
 {
-    auto area = Theme::drawPanel (g, getLocalBounds().toFloat(), "Peak + Average", Theme::needleAccent).reduced (8.0f);
+    auto area = Theme::drawPanel (g, getLocalBounds().toFloat(), stereo ? "Peak + Average  stereo" : "Peak + Average",
+                                  Theme::needleAccent).reduced (8.0f);
 
-    auto legend = area.removeFromBottom (16.0f);
+    // Two dials only when each still gets a sensible shape.
+    const bool sideBySide = stereo && area.getWidth() >= area.getHeight() * 1.5f;
+
+    if (sideBySide)
+    {
+        auto leftArea = area.removeFromLeft ((area.getWidth() - 8.0f) * 0.5f);
+        area.removeFromLeft (8.0f);
+        drawDial (g, leftArea, peak[0], average[0], "L");
+        drawDial (g, area, peak[1], average[1], "R");
+    }
+    else
+    {
+        drawDial (g, area, juce::jmax (peak[0], peak[1]), juce::jmax (average[0], average[1]), stereo ? "L+R" : juce::String());
+    }
+}
+
+void NeedleGauge::drawDial (juce::Graphics& g, juce::Rectangle<float> area, float peakDb, float averageDb,
+                            const juce::String& label) const
+{
+    const float scale = juce::jlimit (1.0f, 2.2f, juce::jmin (area.getWidth() / 460.0f, area.getHeight() / 340.0f));
+    const float legendHeight = 16.0f * scale;
+    const float top = 34.0f * scale;      // room for the scale numbers above the arc
+    const float bottom = 30.0f * scale;   // room below the pivot
+
+    // Size the dial from the space, then shrink the face to fit it so a wide
+    // slot does not leave an empty band under the pivot.
+    const float radius = juce::jmax (20.0f, juce::jmin (area.getWidth() * 0.42f, area.getHeight() - legendHeight - 4.0f - top - bottom));
+    area = area.withSizeKeepingCentre (area.getWidth(), juce::jmin (area.getHeight(), top + radius + bottom + 4.0f + legendHeight));
+
+    auto legend = area.removeFromBottom (legendHeight);
     area.removeFromBottom (4.0f);
 
     // Ivory analogue face
     const auto faceColour = juce::Colour (0xfff1e6c8);
     const auto ink = juce::Colour (0xff1a1712);
+    const auto red = juce::Colour (0xffc8281e);
     g.setGradientFill (juce::ColourGradient (faceColour.brighter (0.06f), area.getCentreX(), area.getY(),
                                              faceColour.darker (0.12f), area.getCentreX(), area.getBottom(), false));
     g.fillRoundedRectangle (area, 4.0f);
     g.setColour (juce::Colours::black);
     g.drawRoundedRectangle (area, 4.0f, 1.5f);
 
-    // Leave room above the arc for the scale numbers.
-    const float radius = juce::jmin (area.getWidth() * 0.40f, (area.getHeight() - 44.0f) * 0.92f);
-    const juce::Point<float> centre (area.getCentreX(), area.getY() + 34.0f + radius);
+    const juce::Point<float> centre (area.getCentreX(), area.getY() + top + radius);
 
     constexpr float minDb = -40.0f, maxDb = 0.0f;
     constexpr float startAngle = -juce::MathConstants<float>::pi * 0.36f;
@@ -324,54 +367,62 @@ void NeedleGauge::paint (juce::Graphics& g)
     juce::Path arc;
     arc.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, startAngle, angleFor (-6.0f), true);
     g.setColour (ink);
-    g.strokePath (arc, juce::PathStrokeType (1.5f));
+    g.strokePath (arc, juce::PathStrokeType (1.5f * scale));
 
     juce::Path hot;
-    hot.addCentredArc (centre.x, centre.y, radius - 3.0f, radius - 3.0f, 0.0f, angleFor (-6.0f), endAngle, true);
-    g.setColour (juce::Colour (0xffc8281e));
-    g.strokePath (hot, juce::PathStrokeType (6.0f));
+    hot.addCentredArc (centre.x, centre.y, radius - 3.0f * scale, radius - 3.0f * scale, 0.0f, angleFor (-6.0f), endAngle, true);
+    g.setColour (red);
+    g.strokePath (hot, juce::PathStrokeType (6.0f * scale));
 
     for (float t = minDb; t <= maxDb; t += 2.0f)
     {
         const bool major = juce::exactlyEqual (std::fmod (t, 10.0f), 0.0f) || t > -7.0f;
         const float a = angleFor (t);
         g.setColour (ink);
-        g.drawLine ({ pointAt (a, radius), pointAt (a, radius + (major ? 9.0f : 5.0f)) }, major ? 1.4f : 0.8f);
+        g.drawLine ({ pointAt (a, radius), pointAt (a, radius + (major ? 9.0f : 5.0f) * scale) }, (major ? 1.4f : 0.8f) * scale);
     }
 
-    g.setFont (Theme::font (10.5f, true));
+    g.setFont (Theme::font (10.5f * scale, true));
     for (float t : { -40.0f, -30.0f, -20.0f, -10.0f, -6.0f, -3.0f, 0.0f })
     {
-        const auto p = pointAt (angleFor (t), radius + 18.0f);
-        g.setColour (t > -7.0f ? juce::Colour (0xffc8281e) : ink);
-        g.drawText (juce::String (juce::roundToInt (t)), juce::Rectangle<float> (28.0f, 12.0f).withCentre (p), juce::Justification::centred);
+        const auto p = pointAt (angleFor (t), radius + 18.0f * scale);
+        g.setColour (t > -7.0f ? red : ink);
+        g.drawText (juce::String (juce::roundToInt (t)), juce::Rectangle<float> (28.0f * scale, 12.0f * scale).withCentre (p),
+                    juce::Justification::centred);
     }
 
     g.setColour (ink.withAlpha (0.55f));
-    g.setFont (Theme::font (11.0f, true));
+    g.setFont (Theme::font (11.0f * scale, true));
     g.drawText ("dBFS", area.reduced (8.0f, 6.0f), juce::Justification::bottomRight);
+
+    if (label.isNotEmpty())
+    {
+        g.setColour (ink.withAlpha (0.75f));
+        g.setFont (Theme::font (16.0f * scale, true));
+        g.drawText (label, area.reduced (10.0f, 6.0f), juce::Justification::bottomLeft);
+    }
 
     auto needle = [&] (float db, juce::Colour c, float thickness)
     {
-        const auto tip = pointAt (angleFor (db), radius + 4.0f);
+        const auto tip = pointAt (angleFor (db), radius + 4.0f * scale);
         g.setColour (juce::Colours::black.withAlpha (0.18f));
         g.drawLine ({ centre.translated (2.0f, 2.0f), tip.translated (2.0f, 2.0f) }, thickness);
         g.setColour (c);
         g.drawLine ({ centre, tip }, thickness);
     };
 
-    needle (average, ink, 2.4f);
-    needle (peak, juce::Colour (0xffd8322a), 1.8f);
+    needle (averageDb, ink, 2.4f * scale);
+    needle (peakDb, juce::Colour (0xffd8322a), 1.8f * scale);
 
     g.setColour (ink);
-    g.fillEllipse (juce::Rectangle<float> (12.0f, 12.0f).withCentre (centre));
+    g.fillEllipse (juce::Rectangle<float> (12.0f * scale, 12.0f * scale).withCentre (centre));
 
-    const float crest = (peak > -149.0f && average > -149.0f) ? peak - average : 0.0f;
-    g.setFont (Theme::font (11.0f, true));
+    const float crest = (peakDb > -149.0f && averageDb > -149.0f) ? peakDb - averageDb : 0.0f;
+    g.setFont (Theme::font (11.0f * scale, true));
     g.setColour (juce::Colour (0xffff5a4e));
-    g.drawText ("PEAK " + Theme::formatDb (peak), legend, juce::Justification::left);
+    g.drawText ("PEAK " + Theme::formatDb (peakDb), legend, juce::Justification::left);
     g.setColour (Theme::needleAccent);
-    g.drawText ("AVG " + Theme::formatDb (average), legend, juce::Justification::centred);
+    g.drawText ("AVG " + Theme::formatDb (averageDb), legend, juce::Justification::centred);
     g.setColour (Theme::textSecondary);
     g.drawText ("CREST " + juce::String (crest, 1), legend, juce::Justification::right);
 }

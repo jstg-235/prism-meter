@@ -52,6 +52,7 @@ target_sources(PrismMeter PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/ui/MeterViews.cpp
+    Source/ui/MeterModules.cpp
 )
 
 target_include_directories(PrismMeter PRIVATE Source)
@@ -85,6 +86,7 @@ if(PRISM_BUILD_SNAPSHOT_TOOL)
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
         Source/ui/MeterViews.cpp
+        Source/ui/MeterModules.cpp
     )
 
     target_include_directories(PrismSnapshot PRIVATE Source)

@@ -80,14 +80,20 @@ private:
 
 //==============================================================================
 /// Dual-needle peak and average gauge on an ivory analogue face (our design).
+/// With two channels and a wide enough area it shows L and R as two dials side
+/// by side; otherwise one dial shows the louder channel.
 class NeedleGauge final : public juce::Component
 {
 public:
     void setValues (float peakDb, float averageDb);
+    void setStereoValues (float peakL, float averageL, float peakR, float averageR);
     void paint (juce::Graphics&) override;
 
 private:
-    float peak = -60.0f, average = -60.0f;
+    void drawDial (juce::Graphics&, juce::Rectangle<float> area, float peakDb, float averageDb, const juce::String& label) const;
+
+    bool stereo = false;
+    float peak[2] { -60.0f, -60.0f }, average[2] { -60.0f, -60.0f };
 };
 
 //==============================================================================
