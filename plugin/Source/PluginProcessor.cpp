@@ -60,6 +60,7 @@ void PrismMeterProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         needles[i].prepare (sampleRate);
     }
 
+    monoNeedle.prepare (sampleRate);
     peakHoldSamples = static_cast<int> (sampleRate * 0.3);
     recentPeakGain.fill (0.0f);
     recentPeakAge.fill (0);
@@ -160,6 +161,8 @@ void PrismMeterProcessor::publishReadings (int numChannels) noexcept
         spMax = juce::jmax (spMax, truePeak[i].getSamplePeak());
     }
 
+    s.monoPeak.store (static_cast<float> (monoNeedle.getPeakDbfs()));
+    s.monoAverage.store (static_cast<float> (monoNeedle.getAverageDbfs()));
     s.truePeakMax.store (static_cast<float> (prism::gainToDb (tpMax)));
     s.samplePeakMax.store (static_cast<float> (prism::gainToDb (spMax)));
 
@@ -193,6 +196,8 @@ void PrismMeterProcessor::pushSpectrumSamples (const float* const* channels, int
                 sum += channels[ch][offset + i];
             monoScratch[static_cast<size_t> (i)] = sum * gain;
         }
+
+        monoNeedle.process (monoScratch.data(), n);
 
         // If the editor is closed nobody drains the FIFO; drop samples instead of blocking.
         const auto scope = spectrumFifo.write (juce::jmin (n, spectrumFifo.getFreeSpace()));

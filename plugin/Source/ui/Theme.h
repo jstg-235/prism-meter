@@ -37,6 +37,7 @@ namespace Theme
     inline const juce::Colour ppmAccent { 0xffff7a45 };       // orange
     inline const juce::Colour kAccent { 0xff5b8cff };         // blue
     inline const juce::Colour radarAccent { 0xffff5c9d };     // rose
+    inline const juce::Colour arcAccent { 0xff2ee6c4 };       // aqua (arc LED peak + average)
 
     inline juce::Font font (float size, bool bold = false)
     {

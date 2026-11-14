@@ -36,6 +36,10 @@ struct MeterState
     std::array<Channel, maxMeterChannels> channels;
     std::atomic<int> numChannels { 2 };
 
+    // Peak + average of the mono sum (L + R) / 2, for the mono arc meter
+    std::atomic<float> monoPeak { -150.0f };
+    std::atomic<float> monoAverage { -150.0f };
+
     // Stereo
     std::atomic<float> correlation { 0.0f };
     std::atomic<float> balanceDb { 0.0f };

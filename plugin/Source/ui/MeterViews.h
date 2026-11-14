@@ -97,6 +97,71 @@ private:
 };
 
 //==============================================================================
+/// LED peak + average meter (our design, after the public idea of showing
+/// peak and average at once on one LED display). The average lights as a
+/// solid bar of LEDs in green / amber / red, and the peak as a single LED in
+/// a contrasting ice-white riding above it, so the gap between them is the
+/// crest factor. A dimmer marker holds the highest peak for two seconds, an
+/// OVER lamp follows the true-peak ceiling, and readouts give peak, average
+/// and crest.
+///
+/// Two shapes: long straight bar graphs (horizontal, or vertical in tall
+/// slots) with a calibrated scale between them, or a wide arched LED monitor
+/// per channel in a recessed bezel (one LED per dB, -25 to +20, with a
+/// dB-re-reference scale above and a dBFS scale below). Clicking the meter
+/// cycles peak hold: auto 3 s, hold until reset, off.
+/// One channel for a mono (or mono-sum) meter, two for stereo.
+class LedPeakAverageMeter final : public juce::Component
+{
+public:
+    enum class Shape { bar, arc };
+    void setShape (Shape newShape) { shape = newShape; }
+
+    void setTitle (juce::String newTitle);
+    void setNumFaces (int n);
+
+    /// Readings in dB relative to the reference (0 = reference level).
+    /// fullScale is where 0 dBFS sits on that relative scale.
+    void setValues (int face, float peakRel, float averageRel, bool over);
+    void setFullScale (float relDb);
+    void setFaceLabel (int face, juce::String label);
+    void setReferenceText (juce::String text);
+    void setPhaseAlarm (bool alarm) { phaseAlarm = alarm; }
+
+    enum class HoldMode { autoReset, untilReset, off };
+    void mouseDown (const juce::MouseEvent&) override;
+
+    void paint (juce::Graphics&) override;
+
+    /// Position 0..1 around the arc for a relative level: the low end is
+    /// compressed and the range around 0 spread out, so the working range
+    /// gets most of the LEDs.
+    static float arcPosition (float relDb) noexcept;
+
+    static constexpr float archedAspect = 3.0f;
+    static constexpr int numBarSegments = 96;
+    static const juce::Colour peakColour;
+    static constexpr float scaleMin = -40.0f, scaleMax = 20.0f;
+
+private:
+    void drawFace (juce::Graphics&, juce::Rectangle<float> area, int face, bool ownPlate) const;
+    void drawBars (juce::Graphics&, juce::Rectangle<float> area) const;
+    juce::Colour zoneColour (float relDb) const noexcept;
+    juce::Colour archedLedColour (float relDb) const noexcept;
+
+    Shape shape = Shape::bar;
+    juce::String title { "Peak + Average" };
+    juce::String referenceText;
+    int numFaces = 2;
+    HoldMode holdMode = HoldMode::autoReset;
+    bool phaseAlarm = false;
+    float fullScale = 18.0f;
+    std::array<float, 2> peak { -60.0f, -60.0f }, average { -60.0f, -60.0f }, hold { -60.0f, -60.0f };
+    std::array<int, 2> holdFrames { 0, 0 }, overFrames { 0, 0 };
+    std::array<juce::String, 2> labels { "L", "R" };
+};
+
+//==============================================================================
 /// Classic analogue VU meters, one per channel (our design): a backlit warm
 /// face behind glass in a dark bezel, the standard -20 to +3 VU scale laid out
 /// on the voltage law with a red zone above 0 VU, a secondary percent scale,

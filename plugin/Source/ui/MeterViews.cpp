@@ -1,6 +1,7 @@
 #include "MeterViews.h"
 #include "Theme.h"
 
+#include <algorithm>
 #include <cmath>
 
 //==============================================================================
@@ -1182,4 +1183,686 @@ void SpectrumView::paint (juce::Graphics& g)
     }
     g.setColour (Theme::textSecondary);
     g.drawText ("time", sgPlot.reduced (4.0f, 2.0f), juce::Justification::bottomRight);
+}
+
+//==============================================================================
+const juce::Colour LedPeakAverageMeter::peakColour { 0xffe6f6ff };
+
+void LedPeakAverageMeter::setTitle (juce::String newTitle) { title = std::move (newTitle); }
+void LedPeakAverageMeter::mouseDown (const juce::MouseEvent&)
+{
+    // Click cycles peak hold: auto 3 s -> hold until reset -> off -> auto.
+    holdMode = holdMode == HoldMode::autoReset ? HoldMode::untilReset
+             : holdMode == HoldMode::untilReset ? HoldMode::off : HoldMode::autoReset;
+    hold = peak;
+    repaint();
+}
+
+void LedPeakAverageMeter::setNumFaces (int n) { numFaces = juce::jlimit (1, 2, n); }
+void LedPeakAverageMeter::setFullScale (float relDb) { fullScale = relDb; }
+void LedPeakAverageMeter::setReferenceText (juce::String text) { referenceText = std::move (text); }
+
+void LedPeakAverageMeter::setFaceLabel (int face, juce::String label)
+{
+    labels[static_cast<size_t> (juce::jlimit (0, 1, face))] = std::move (label);
+}
+
+void LedPeakAverageMeter::setValues (int face, float peakRel, float averageRel, bool over)
+{
+    const auto i = static_cast<size_t> (juce::jlimit (0, 1, face));
+    peak[i] = peakRel;
+    average[i] = averageRel;
+
+    // Peak hold: off, auto (highest peak held three seconds at the 30 Hz UI
+    // rate, then reset) or held until the mode is changed.
+    if (holdMode == HoldMode::off || peakRel >= hold[i])
+    {
+        hold[i] = peakRel;
+        holdFrames[i] = 90;
+    }
+    else if (holdMode == HoldMode::autoReset && --holdFrames[i] <= 0)
+    {
+        hold[i] = peakRel;
+        holdFrames[i] = 90;
+    }
+
+    // The OVER lamp stays lit for a second so a single over is not missed.
+    overFrames[i] = over ? 30 : juce::jmax (0, overFrames[i] - 1);
+}
+
+float LedPeakAverageMeter::arcPosition (float relDb) noexcept
+{
+    // Piecewise-linear scale (our design): -40..-20 squeezed into the first
+    // fifth, the working range around 0 spread wide, headroom to +20.
+    static constexpr std::array<std::pair<float, float>, 9> points { {
+        { -40.0f, 0.00f }, { -30.0f, 0.08f }, { -20.0f, 0.18f }, { -10.0f, 0.36f }, { -5.0f, 0.49f },
+        { 0.0f, 0.63f }, { 5.0f, 0.75f }, { 10.0f, 0.86f }, { 20.0f, 1.00f } } };
+
+    if (relDb <= points.front().first)
+        return 0.0f;
+
+    for (size_t i = 1; i < points.size(); ++i)
+    {
+        if (relDb <= points[i].first)
+        {
+            const auto [x0, y0] = points[i - 1];
+            const auto [x1, y1] = points[i];
+            return y0 + (relDb - x0) / (x1 - x0) * (y1 - y0);
+        }
+    }
+
+    return 1.0f;
+}
+
+juce::Colour LedPeakAverageMeter::zoneColour (float relDb) const noexcept
+{
+    if (relDb >= fullScale - 6.0f)
+        return Theme::levelRed;
+    if (relDb >= 0.0f)
+        return Theme::levelYellow;
+    return Theme::levelGreen;
+}
+
+void LedPeakAverageMeter::paint (juce::Graphics& g)
+{
+    auto area = Theme::drawPanel (g, getLocalBounds().toFloat(), title, Theme::arcAccent).reduced (10.0f);
+
+    if (referenceText.isNotEmpty())
+    {
+        g.setColour (Theme::textSecondary);
+        g.setFont (Theme::font (11.0f));
+        g.drawText (referenceText, area.removeFromBottom (16.0f), juce::Justification::centredRight);
+        area.removeFromBottom (4.0f);
+    }
+
+    if (shape == Shape::bar)
+    {
+        drawBars (g, area);
+        return;
+    }
+
+    constexpr float aspect = archedAspect; // width / height of one unit
+    constexpr float gap = 8.0f;
+
+    if (numFaces < 2)
+    {
+        drawFace (g, area, 0, true);
+        return;
+    }
+
+    // Stereo: two units side by side in one rack panel with ears, as a
+    // console pair is usually mounted; stacked when the slot is too tall
+    // and narrow for that to stay readable.
+    constexpr float earsRatio = 0.5f; // both ears together, in unit heights
+    const float rackH = juce::jmin (area.getHeight(), area.getWidth() / (2.0f * aspect + earsRatio));
+    const float stackH = juce::jmin ((area.getHeight() - gap) * 0.5f, area.getWidth() / aspect);
+
+    if (rackH >= 0.6f * stackH)
+    {
+        auto rack = area.withSizeKeepingCentre (rackH * (2.0f * aspect + earsRatio), rackH);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff666a70), rack.getX(), rack.getY(),
+                                                 juce::Colour (0xff4b4e53), rack.getX(), rack.getBottom(), false));
+        g.fillRoundedRectangle (rack, 3.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.10f));
+        g.drawRoundedRectangle (rack.reduced (0.5f), 3.0f, 1.0f);
+
+        // Rack ears with mounting slots and screws
+        const float ear = rackH * earsRatio * 0.5f;
+        for (auto x : { rack.getX() + ear * 0.5f, rack.getRight() - ear * 0.5f })
+        {
+            for (auto y : { rack.getY() + rackH * 0.16f, rack.getBottom() - rackH * 0.16f })
+            {
+                const float d = rackH * 0.075f;
+                g.setColour (juce::Colour (0xff1d1e20));
+                g.fillRoundedRectangle (juce::Rectangle<float> (d * 1.6f, d).withCentre ({ x, y }), d * 0.5f);
+            }
+            for (auto y : { rack.getY() + rackH * 0.36f, rack.getBottom() - rackH * 0.36f })
+            {
+                const float d = rackH * 0.05f;
+                g.setColour (juce::Colour (0xff8a8d92));
+                g.fillEllipse (juce::Rectangle<float> (d, d).withCentre ({ x, y }));
+                g.setColour (juce::Colour (0xff3a3c40));
+                g.drawLine (x - d * 0.35f, y, x + d * 0.35f, y, 1.0f);
+            }
+        }
+
+        auto units = rack.reduced (ear, 0.0f);
+        auto left = units.removeFromLeft (units.getWidth() * 0.5f);
+        drawFace (g, left, 0, false);
+        drawFace (g, units, 1, false);
+        return;
+    }
+
+    auto top = area.removeFromTop ((area.getHeight() - gap) * 0.5f);
+    area.removeFromTop (gap);
+    drawFace (g, top, 0, true);
+    drawFace (g, area, 1, true);
+}
+
+namespace
+{
+    /// Draws text along a circular arc, centred on midAngle (0 = straight up,
+    /// clockwise positive), letters upright relative to the arc.
+    void drawTextOnArc (juce::Graphics& g, const juce::String& text, juce::Point<float> centre, float radius,
+                        float midAngle, const juce::Font& font)
+    {
+        juce::GlyphArrangement glyphs;
+        glyphs.addLineOfText (font, text, 0.0f, 0.0f);
+        const float width = glyphs.getBoundingBox (0, -1, true).getWidth();
+        const float ascent = font.getAscent() * 0.35f;
+
+        for (int i = 0; i < glyphs.getNumGlyphs(); ++i)
+        {
+            const auto& glyph = glyphs.getGlyph (i);
+            const float x = glyph.getLeft() + glyph.getBounds().getWidth() * 0.5f - width * 0.5f;
+            const float angle = midAngle + x / radius;
+            const auto p = centre + juce::Point<float> (std::sin (angle) * radius, -std::cos (angle) * radius);
+            const auto t = juce::AffineTransform::translation (-(glyph.getLeft() + glyph.getBounds().getWidth() * 0.5f), ascent)
+                               .rotated (angle)
+                               .translated (p);
+            glyph.draw (g, t);
+        }
+    }
+}
+
+juce::Colour LedPeakAverageMeter::archedLedColour (float relDb) const noexcept
+{
+    // Our zone layout for the arched monitor: green for low persistence,
+    // amber for the normal persistence range, red around the reference
+    // (0 +/- 1), yellow-green across the normal peak range and red again
+    // in the last few dB before full scale.
+    if (relDb >= fullScale - 0.5f)
+        return Theme::levelRed;
+    if (relDb >= juce::jmin (12.0f, fullScale - 6.0f))
+        return juce::Colour (0xffff4a2a);
+    if (relDb >= 2.0f)
+        return juce::Colour (0xffc8e83a);
+    if (relDb >= -1.0f)
+        return juce::Colour (0xffff3b2a);
+    if (relDb >= -10.0f)
+        return juce::Colour (0xffffa526);
+    return juce::Colour (0xff4fe03a);
+}
+
+void LedPeakAverageMeter::drawFace (juce::Graphics& g, juce::Rectangle<float> area, int face, bool ownPlate) const
+{
+    // Wide arched LED monitor in a deep recessed bezel (our design, after the
+    // public look of console loudness monitors): one LED per dB from -25 to
+    // +20 along a shallow arc, the average lit as a bar and the peak as a
+    // single LED, a dB-re-reference scale above and a dBFS peak scale below.
+    const float h = juce::jmin (area.getHeight(), area.getWidth() / archedAspect);
+    if (h < 40.0f)
+        return;
+
+    auto unit = area.withSizeKeepingCentre (h * archedAspect, h);
+    const float s = juce::jlimit (0.4f, 2.4f, h / 300.0f);
+    const auto i = static_cast<size_t> (face);
+
+    // --- Grey plate behind a free-standing unit (a rack pair has its own panel)
+    if (ownPlate)
+    {
+        g.setColour (juce::Colour (0xff5d6066));
+        g.fillRoundedRectangle (unit, 4.0f * s);
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.drawRoundedRectangle (unit.reduced (0.5f), 4.0f * s, 1.0f);
+    }
+
+    // --- Deep recessed bezel: black frame with angled inner walls
+    auto frame = unit.reduced (h * 0.035f);
+    g.setColour (juce::Colour (0xff0d0d0e));
+    g.fillRoundedRectangle (frame, 6.0f * s);
+
+    const float wall = h * 0.07f;
+    auto faceRect = frame.reduced (wall + h * 0.02f);
+    auto wallOuter = frame.reduced (h * 0.02f);
+    auto quad = [&] (juce::Point<float> a, juce::Point<float> b, juce::Point<float> c, juce::Point<float> d, juce::Colour col)
+    {
+        juce::Path p;
+        p.startNewSubPath (a); p.lineTo (b); p.lineTo (c); p.lineTo (d); p.closeSubPath();
+        g.setColour (col);
+        g.fillPath (p);
+    };
+    quad (wallOuter.getTopLeft(), wallOuter.getTopRight(), faceRect.getTopRight(), faceRect.getTopLeft(), juce::Colour (0xff050505));
+    quad (wallOuter.getBottomLeft(), wallOuter.getBottomRight(), faceRect.getBottomRight(), faceRect.getBottomLeft(), juce::Colour (0xff2a2b2e));
+    quad (wallOuter.getTopLeft(), wallOuter.getBottomLeft(), faceRect.getBottomLeft(), faceRect.getTopLeft(), juce::Colour (0xff141416));
+    quad (wallOuter.getTopRight(), wallOuter.getBottomRight(), faceRect.getBottomRight(), faceRect.getTopRight(), juce::Colour (0xff1c1d20));
+    g.setColour (juce::Colours::white.withAlpha (0.06f));
+    g.drawRect (wallOuter, 1.0f);
+
+    // --- Smoked face
+    g.saveState();
+    g.reduceClipRegion (faceRect.toNearestInt());
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c2019), faceRect.getCentreX(), faceRect.getY(),
+                                             juce::Colour (0xff160f0b), faceRect.getCentreX(), faceRect.getBottom(), false));
+    g.fillRect (faceRect);
+
+    const float W = faceRect.getWidth(), H = faceRect.getHeight();
+
+    // Arc geometry: a chord across most of the face with a shallow rise.
+    const float chord = W * 0.80f;
+    const float sagitta = H * 0.17f;
+    const float R = (chord * chord * 0.25f + sagitta * sagitta) / (2.0f * sagitta);
+    const float halfAngle = std::asin (chord * 0.5f / R);
+    const float ledLen = H * 0.2f;
+    const float r0 = R;                              // LED inner radius
+    const float topY = faceRect.getY() + H * 0.34f;  // top of the arc's inner edge
+    const juce::Point<float> centre (faceRect.getCentreX(), topY + r0);
+
+    constexpr float lo = -25.0f, hi = 20.0f;
+    constexpr int numLeds = static_cast<int> (hi - lo) + 1;
+    auto angleFor = [&] (float rel) { return -halfAngle + (rel - lo) / (hi - lo) * 2.0f * halfAngle; };
+    auto pointAt = [&] (float angle, float r) { return centre + juce::Point<float> (std::sin (angle) * r, -std::cos (angle) * r); };
+
+    const float pitch = 2.0f * halfAngle * R / static_cast<float> (numLeds - 1);
+    const float ledW = pitch * 0.62f;
+
+    const int avgLed = juce::roundToInt (average[i] - lo);
+    const int peakLed = peak[i] > lo - 0.5f ? juce::jlimit (0, numLeds - 1, juce::roundToInt (peak[i] - lo)) : -1;
+    const int holdLed = (holdMode != HoldMode::off && hold[i] > lo - 0.5f) ? juce::jlimit (0, numLeds - 1, juce::roundToInt (hold[i] - lo)) : -1;
+    const bool over = overFrames[i] > 0;
+
+    for (int k = 0; k < numLeds; ++k)
+    {
+        const float rel = lo + static_cast<float> (k);
+        const float a = angleFor (rel);
+        auto colour = archedLedColour (rel);
+        if (k == numLeds - 1 && over)
+            colour = Theme::levelRed;
+
+        juce::Path led;
+        led.addRoundedRectangle (-ledW * 0.5f, -(r0 + ledLen), ledW, ledLen, ledW * 0.18f);
+        const auto t = juce::AffineTransform::rotation (a).translated (centre);
+        led.applyTransform (t);
+
+        const bool lit = k <= avgLed;
+        const bool isPeak = k == peakLed || (k == numLeds - 1 && over);
+        const bool isHold = k == holdLed;
+
+        if (isPeak || isHold)
+        {
+            g.setColour (colour.withAlpha (isPeak ? 0.45f : 0.25f));
+            g.strokePath (led, juce::PathStrokeType (4.0f * s));
+            g.setColour (isPeak ? colour.interpolatedWith (juce::Colours::white, 0.35f) : colour);
+        }
+        else if (lit)
+        {
+            g.setColour (colour.withAlpha (0.92f));
+        }
+        else
+        {
+            g.setColour (colour.withAlpha (0.13f));
+        }
+        g.fillPath (led);
+    }
+
+    // --- Upper scale (dB re reference) and its rule
+    const float ruleR = r0 + ledLen + H * 0.025f;
+    {
+        juce::Path rule;
+        rule.addCentredArc (centre.x, centre.y, ruleR, ruleR, 0.0f, angleFor (lo - 0.5f), angleFor (11.5f), true);
+        g.setColour (juce::Colour (0xffc8e83a).withAlpha (0.85f));
+        g.strokePath (rule, juce::PathStrokeType (1.6f * s));
+        juce::Path hot;
+        hot.addCentredArc (centre.x, centre.y, ruleR, ruleR, 0.0f, angleFor (11.5f), angleFor (hi + 0.5f), true);
+        g.setColour (juce::Colour (0xffff4a2a));
+        g.strokePath (hot, juce::PathStrokeType (2.4f * s));
+    }
+
+    const auto numberFont = Theme::font (juce::jmax (6.0f, 11.0f * s), true);
+    for (int v = static_cast<int> (lo); v <= static_cast<int> (hi); ++v)
+    {
+        if ((v > 14 && v != static_cast<int> (hi)) || (v < -10 && v % 5 != 0))
+            continue;
+        const float rel = static_cast<float> (v);
+        const auto text = v > 0 ? "+" + juce::String (v) : juce::String (v);
+        const auto col = (v >= -1 && v <= 1) || v >= 12 ? juce::Colour (0xffff6a40) : juce::Colour (0xffeee6d8);
+        g.setColour (col);
+        drawTextOnArc (g, v == static_cast<int> (hi) ? juce::String ("FS") : text, centre, ruleR + H * 0.055f, angleFor (rel), numberFont);
+    }
+
+    // --- Lower scale: the same LEDs read in dBFS across the peak range
+    const float lowR = r0 - H * 0.055f;
+    for (int v = 0; v <= static_cast<int> (hi); v += 2)
+    {
+        const float rel = static_cast<float> (v);
+        const float dbfs = rel - fullScale;
+        if (dbfs > 0.5f)
+            continue;
+        g.setColour (juce::Colour (0xffeee6d8).withAlpha (0.85f));
+        drawTextOnArc (g, juce::String (juce::roundToInt (dbfs)), centre, lowR, angleFor (rel),
+                       Theme::font (juce::jmax (6.0f, 9.5f * s), true));
+    }
+
+    // Range rules and their captions under the arc
+    const float rangeR = r0 - H * 0.12f;
+    auto rangeArc = [&] (float from, float to, juce::Colour col, const juce::String& caption)
+    {
+        juce::Path p;
+        p.addCentredArc (centre.x, centre.y, rangeR, rangeR, 0.0f, angleFor (from), angleFor (to), true);
+        g.setColour (col);
+        g.strokePath (p, juce::PathStrokeType (1.4f * s));
+        g.setColour (juce::Colour (0xffff7a3a));
+        drawTextOnArc (g, caption, centre, rangeR - H * 0.06f, 0.5f * (angleFor (from) + angleFor (to)),
+                       Theme::font (juce::jmax (6.0f, 10.0f * s), true));
+    };
+    rangeArc (-20.0f, -1.0f, juce::Colour (0xffc8e83a).withAlpha (0.8f), "NORMAL PERSISTENCE RANGE");
+    rangeArc (2.0f, 11.0f, juce::Colour (0xffff7a3a).withAlpha (0.8f), "NORMAL PEAK RANGE");
+
+    // "dB" at both ends, and the "dBFS" unit for the lower scale
+    g.setColour (juce::Colour (0xffeee6d8));
+    g.setFont (Theme::font (juce::jmax (6.0f, 10.0f * s), true));
+    g.drawText ("dB", juce::Rectangle<float> (24.0f * s, 14.0f * s).withCentre (pointAt (angleFor (lo) - 0.03f, r0 + ledLen * 0.5f)).translated (-10.0f * s, 0.0f),
+                juce::Justification::centred);
+    g.drawText ("dB", juce::Rectangle<float> (24.0f * s, 14.0f * s).withCentre (pointAt (angleFor (hi) + 0.03f, r0 + ledLen * 0.5f)).translated (10.0f * s, 0.0f),
+                juce::Justification::centred);
+
+    // --- PHASE lamp (stereo) and peak-hold mode, top corners
+    const float lampD = juce::jmax (5.0f, 9.0f * s);
+    auto lamp = juce::Rectangle<float> (lampD, lampD).withPosition (faceRect.getX() + 12.0f * s, faceRect.getY() + 10.0f * s);
+    if (numFaces == 2)
+    {
+        g.setColour (phaseAlarm ? Theme::levelRed : juce::Colour (0xff4a1610));
+        g.fillEllipse (lamp);
+        g.setColour (juce::Colour (0xffc8e83a).withAlpha (0.85f));
+        g.setFont (Theme::font (juce::jmax (6.0f, 10.0f * s), true));
+        g.drawText ("PHASE", lamp.withWidth (70.0f * s).translated (lampD + 5.0f * s, -2.0f * s).withHeight (lampD + 4.0f * s),
+                    juce::Justification::centredLeft);
+    }
+
+    g.setColour (juce::Colour (0xffeee6d8).withAlpha (0.6f));
+    g.setFont (Theme::font (juce::jmax (6.0f, 9.0f * s), true));
+    const juce::String holdText = holdMode == HoldMode::off ? "PEAK HOLD OFF"
+                                : holdMode == HoldMode::autoReset ? "PEAK HOLD 3 s" : "PEAK HOLD";
+    g.drawText (holdText, faceRect.reduced (12.0f * s, 8.0f * s).withHeight (14.0f * s), juce::Justification::centredRight);
+
+    // --- Nameplate strip: rule, caption, readouts
+    auto plate = faceRect.withTop (faceRect.getBottom() - H * 0.19f).reduced (12.0f * s, 0.0f);
+    g.setColour (juce::Colour (0xffeee6d8).withAlpha (0.75f));
+    g.drawLine (plate.getX(), plate.getY() + H * 0.08f, plate.getRight(), plate.getY() + H * 0.08f, 1.0f * s);
+
+    auto title = plate.removeFromTop (H * 0.08f);
+    g.setFont (Theme::font (juce::jmax (7.0f, 14.0f * s)));
+    g.drawText ("Peak + Average Monitor", title.translated (0.0f, -2.0f * s), juce::Justification::centred);
+
+    auto bottom = plate.withTrimmedTop (2.0f * s);
+    g.setFont (Theme::font (juce::jmax (6.0f, 9.0f * s), true));
+    g.setColour (juce::Colour (0xffeee6d8).withAlpha (0.55f));
+    g.drawText ("NEW CONSTELLATION", bottom, juce::Justification::centredLeft);
+    g.setColour (Theme::arcAccent);
+    g.setFont (Theme::font (juce::jmax (7.0f, 12.0f * s), true));
+    g.drawText (labels[i], bottom, juce::Justification::centredRight);
+
+    auto fmt = [] (float v) { return v <= -45.0f ? juce::String ("--") : (v > 0.0f ? "+" : "") + juce::String (v, 1); };
+    const bool hasCrest = peak[i] > -45.0f && average[i] > -45.0f;
+    const auto readout = "AVG " + fmt (average[i]) + "    PEAK " + fmt (holdMode == HoldMode::off ? peak[i] : hold[i])
+                       + "    P-A " + (hasCrest ? juce::String (juce::jmax (0.0f, peak[i] - average[i]), 1) : juce::String ("--"));
+    g.setColour (juce::Colour (0xffeee6d8));
+    g.setFont (Theme::mono (juce::jmax (7.0f, 12.0f * s), true));
+    g.drawText (readout, bottom, juce::Justification::centred);
+
+    // Glass sheen across the top of the window
+    juce::Path sheen;
+    sheen.addRectangle (faceRect.withHeight (H * 0.45f));
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.05f), faceRect.getCentreX(), faceRect.getY(),
+                                             juce::Colours::transparentWhite, faceRect.getCentreX(), faceRect.getY() + H * 0.45f, false));
+    g.fillPath (sheen);
+
+    g.restoreState();
+}
+
+
+void LedPeakAverageMeter::drawBars (juce::Graphics& g, juce::Rectangle<float> area) const
+{
+    // Long LED bar graphs in one dark instrument: horizontal when the slot is
+    // wide, vertical when it is tall. The calibrated scale sits between the
+    // two bars (stereo) or beside the one bar (mono).
+    const bool vertical = area.getHeight() > area.getWidth() * 1.1f;
+    const float minSide = juce::jmin (area.getWidth(), area.getHeight());
+    const float s = juce::jlimit (0.5f, 2.0f, (vertical ? area.getWidth() : area.getHeight()) / 360.0f);
+    if (minSide < 40.0f)
+        return;
+
+    // --- Bezel and black face
+    auto bezel = area;
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a3d42), bezel.getX(), bezel.getY(),
+                                             juce::Colour (0xff131417), bezel.getX(), bezel.getBottom(), false));
+    g.fillRoundedRectangle (bezel, 10.0f * s);
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    g.drawRoundedRectangle (bezel.reduced (1.0f), 10.0f * s, 1.0f);
+    g.setColour (juce::Colours::black);
+    g.drawRoundedRectangle (bezel, 10.0f * s, 1.2f);
+
+    auto window = bezel.reduced (juce::jmax (6.0f, 12.0f * s));
+    g.setColour (Theme::arcAccent.withAlpha (0.55f));
+    g.drawRoundedRectangle (window.expanded (2.5f), 6.0f * s, 1.0f);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff0e1114), window.getCentreX(), window.getY(),
+                                             juce::Colour (0xff040506), window.getCentreX(), window.getBottom(), false));
+    g.fillRoundedRectangle (window, 6.0f * s);
+
+    auto inner = window.reduced (14.0f * s);
+
+    // --- Readouts: a column on the right (horizontal) or a strip at the bottom (vertical)
+    const int n = numFaces;
+    juce::Rectangle<float> readouts;
+    if (vertical)
+        readouts = inner.removeFromBottom (juce::jlimit (60.0f, 150.0f, inner.getHeight() * 0.2f));
+    else
+        readouts = inner.removeFromRight (juce::jlimit (110.0f, 280.0f, inner.getWidth() * 0.2f));
+    if (vertical) inner.removeFromBottom (10.0f * s); else inner.removeFromRight (16.0f * s);
+
+    // Leave room at both ends of the scale for the end labels.
+    const float endPad = (vertical ? 16.0f : 22.0f) * s;
+    if (vertical) inner.reduce (0.0f, endPad); else inner.reduce (endPad, 0.0f);
+
+    // --- Lanes: [bar, scale, bar] for stereo, [bar, scale] for mono
+    const float across = vertical ? inner.getWidth() : inner.getHeight();
+    const float along = vertical ? inner.getHeight() : inner.getWidth();
+    const float scaleW = juce::jlimit (34.0f, 90.0f, across * (n == 2 ? 0.26f : 0.4f));
+    const float laneW = juce::jmin ((across - scaleW) / static_cast<float> (n), juce::jmax (18.0f, along * 0.11f));
+    const float total = laneW * static_cast<float> (n) + scaleW;
+    auto lanesArea = vertical ? inner.withSizeKeepingCentre (total, inner.getHeight())
+                              : inner.withSizeKeepingCentre (inner.getWidth(), total);
+
+    auto take = [&] (float w)
+    {
+        return vertical ? lanesArea.removeFromLeft (w) : lanesArea.removeFromTop (w);
+    };
+
+    std::array<juce::Rectangle<float>, 2> lanes;
+    juce::Rectangle<float> scaleArea;
+    lanes[0] = take (laneW);
+    scaleArea = take (scaleW);
+    if (n == 2)
+        lanes[1] = take (laneW);
+
+    // Position along a lane for a level: left to right, or bottom to top.
+    auto posFor = [&] (float rel)
+    {
+        const float t = arcPosition (rel);
+        return vertical ? inner.getBottom() - t * inner.getHeight() : inner.getX() + t * inner.getWidth();
+    };
+
+    auto segmentRect = [&] (const juce::Rectangle<float>& lane, float p0, float p1)
+    {
+        return vertical ? juce::Rectangle<float> (lane.getX(), juce::jmin (p0, p1), lane.getWidth(), std::abs (p1 - p0))
+                        : juce::Rectangle<float> (juce::jmin (p0, p1), lane.getY(), std::abs (p1 - p0), lane.getHeight());
+    };
+
+    // Level at a segment's centre, for its zone colour.
+    auto levelAt = [] (float t)
+    {
+        float lo = scaleMin, hi = scaleMax;
+        for (int it = 0; it < 24; ++it)
+        {
+            const float mid = 0.5f * (lo + hi);
+            (arcPosition (mid) < t ? lo : hi) = mid;
+        }
+        return 0.5f * (lo + hi);
+    };
+
+    const float segLen = along / static_cast<float> (numBarSegments);
+    const float gapLen = juce::jmax (1.0f, segLen * 0.28f);
+
+    for (int ch = 0; ch < n; ++ch)
+    {
+        const auto i = static_cast<size_t> (ch);
+        const auto lane = lanes[i];
+
+        // Recessed channel behind the LEDs
+        g.setColour (juce::Colours::black);
+        g.fillRoundedRectangle (lane.expanded (3.0f * s), 3.0f * s);
+
+        const float avgT = arcPosition (average[i]);
+        const int peakSeg = peak[i] > scaleMin
+                              ? juce::jlimit (0, numBarSegments - 1, static_cast<int> (arcPosition (peak[i]) * numBarSegments))
+                              : -1;
+        const int holdSeg = hold[i] > scaleMin
+                              ? juce::jlimit (0, numBarSegments - 1, static_cast<int> (arcPosition (hold[i]) * numBarSegments))
+                              : -1;
+
+        for (int k = 0; k < numBarSegments; ++k)
+        {
+            const float t0 = static_cast<float> (k) / numBarSegments;
+            const float t1 = static_cast<float> (k + 1) / numBarSegments;
+            const float a = vertical ? inner.getBottom() - t0 * along : inner.getX() + t0 * along;
+            const float b = vertical ? inner.getBottom() - t1 * along + gapLen : inner.getX() + t1 * along - gapLen;
+            auto seg = segmentRect (lane, a, b);
+
+            const auto colour = zoneColour (levelAt (0.5f * (t0 + t1)));
+            const bool lit = t1 <= avgT + 0.5f / numBarSegments;
+
+            if (k == peakSeg)
+            {
+                g.setColour (peakColour.withAlpha (0.35f));
+                g.fillRect (seg.expanded (2.5f * s));
+                g.setColour (peakColour);
+            }
+            else if (k == holdSeg)
+            {
+                g.setColour (peakColour.withAlpha (0.55f));
+            }
+            else if (lit)
+            {
+                g.setColour (colour.withAlpha (0.92f));
+            }
+            else
+            {
+                g.setColour (colour.withAlpha (0.09f));
+            }
+            g.fillRect (seg);
+        }
+
+        // Channel label at the low end of the bar
+        g.setColour (Theme::arcAccent);
+        g.setFont (Theme::font (juce::jmax (9.0f, 14.0f * s), true));
+        const auto labelBox = vertical ? juce::Rectangle<float> (lane.getX(), inner.getBottom() + 2.0f, lane.getWidth(), endPad)
+                                       : juce::Rectangle<float> (inner.getX() - endPad - 2.0f, lane.getY(), endPad, lane.getHeight());
+        g.drawText (n == 2 ? labels[i] : juce::String ("M"), labelBox, juce::Justification::centred);
+    }
+
+    // --- Calibrated scale: ticks toward each bar, numbers in the middle
+    g.setFont (Theme::font (juce::jmax (8.0f, 12.5f * s), true));
+    for (float rel : { -40.0f, -35.0f, -30.0f, -25.0f, -20.0f, -18.0f, -16.0f, -14.0f, -12.0f, -10.0f, -8.0f, -6.0f, -5.0f,
+                       -4.0f, -3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 8.0f, 10.0f, 12.0f, 14.0f,
+                       16.0f, 18.0f, 20.0f })
+    {
+        const float p = posFor (rel);
+        static constexpr float numberedLevels[] { -40.0f, -30.0f, -20.0f, -10.0f, -6.0f, -3.0f, 0.0f, 3.0f, 6.0f, 10.0f, 14.0f, 20.0f };
+        const bool numbered = std::find (std::begin (numberedLevels), std::end (numberedLevels), rel) != std::end (numberedLevels);
+        const auto col = rel > 0.0f ? (rel >= fullScale - 6.0f ? Theme::levelRed : Theme::levelYellow)
+                                    : Theme::textPrimary.withAlpha (rel == 0.0f ? 1.0f : 0.72f);
+        g.setColour (col);
+        const float tick = (numbered ? 7.0f : 4.0f) * s;
+        const float thick = (rel == 0.0f ? 2.0f : 1.0f) * s;
+
+        if (vertical)
+        {
+            g.drawLine (scaleArea.getX(), p, scaleArea.getX() + tick, p, thick);
+            if (n == 2)
+                g.drawLine (scaleArea.getRight() - tick, p, scaleArea.getRight(), p, thick);
+        }
+        else
+        {
+            g.drawLine (p, scaleArea.getY(), p, scaleArea.getY() + tick, thick);
+            if (n == 2)
+                g.drawLine (p, scaleArea.getBottom() - tick, p, scaleArea.getBottom(), thick);
+        }
+
+        if (numbered)
+        {
+            const auto text = rel > 0.0f ? "+" + juce::String (juce::roundToInt (rel)) : juce::String (juce::roundToInt (rel));
+            const auto box = vertical ? juce::Rectangle<float> (scaleArea.getWidth(), 14.0f * s).withCentre ({ scaleArea.getCentreX(), p })
+                                      : juce::Rectangle<float> (32.0f * s, scaleArea.getHeight()).withCentre ({ p, scaleArea.getCentreY() });
+            g.drawText (text, box, juce::Justification::centred);
+        }
+    }
+
+    // 0 dBFS mark across the scale
+    if (fullScale <= scaleMax)
+    {
+        const float p = posFor (fullScale);
+        g.setColour (Theme::levelRed);
+        g.setFont (Theme::font (juce::jmax (7.0f, 9.0f * s), true));
+        const auto box = vertical ? juce::Rectangle<float> (scaleArea.getWidth(), 12.0f * s).withCentre ({ scaleArea.getCentreX(), p })
+                                  : juce::Rectangle<float> (24.0f * s, 12.0f * s).withCentre ({ p, scaleArea.getBottom() - (n == 2 ? 14.0f : 4.0f) * s });
+        g.drawText ("FS", box, juce::Justification::centred);
+    }
+
+    // --- Readouts per channel, with an OVER lamp
+    auto fmt = [] (float v) { return v <= scaleMin - 20.0f ? juce::String ("--") : (v > 0.0f ? "+" : "") + juce::String (v, 1); };
+
+    for (int ch = 0; ch < n; ++ch)
+    {
+        const auto i = static_cast<size_t> (ch);
+        juce::Rectangle<float> box;
+        if (vertical)
+        {
+            box = readouts.withWidth (readouts.getWidth() / static_cast<float> (n)).translated (readouts.getWidth() / static_cast<float> (n) * static_cast<float> (ch), 0.0f).reduced (3.0f, 0.0f);
+        }
+        else
+        {
+            // Line each readout up with its bar.
+            const auto lane = lanes[i];
+            const float h = juce::jmax (lane.getHeight() + scaleW * 0.5f, 84.0f * s);
+            box = juce::Rectangle<float> (readouts.getX(), lane.getCentreY() - h * 0.5f, readouts.getWidth(), h)
+                      .constrainedWithin (readouts);
+        }
+
+        g.setColour (juce::Colours::black.withAlpha (0.55f));
+        g.fillRoundedRectangle (box, 4.0f * s);
+
+        auto inside = box.reduced (8.0f * s, 4.0f * s);
+        auto lampRow = inside.removeFromTop (inside.getHeight() * 0.25f);
+        const bool lit = overFrames[i] > 0;
+        auto lamp = lampRow.removeFromRight (juce::jmin (52.0f * s, lampRow.getWidth() * 0.5f)).reduced (0.0f, 2.0f * s);
+        g.setColour (lit ? Theme::levelRed : juce::Colour (0xff3a1210));
+        g.fillRoundedRectangle (lamp, 3.0f * s);
+        g.setColour (lit ? juce::Colours::white : juce::Colour (0xff7a3a34));
+        g.setFont (Theme::font (juce::jmax (7.0f, 9.5f * s), true));
+        g.drawText ("OVER", lamp, juce::Justification::centred);
+        g.setColour (Theme::arcAccent);
+        g.setFont (Theme::font (juce::jmax (9.0f, 14.0f * s), true));
+        g.drawText (labels[i], lampRow, juce::Justification::centredLeft);
+
+        const float rowH = inside.getHeight() / 3.0f;
+        auto row = [&] (const juce::String& name, const juce::String& value, juce::Colour colour)
+        {
+            auto r = inside.removeFromTop (rowH);
+            g.setColour (Theme::textSecondary);
+            g.setFont (Theme::font (juce::jmax (7.0f, 10.0f * s), true));
+            g.drawText (name, r.removeFromLeft (r.getWidth() * 0.38f), juce::Justification::centredLeft);
+            g.setColour (colour);
+            g.setFont (Theme::mono (juce::jmax (9.0f, juce::jmin (rowH * 0.9f, 20.0f * s)), true));
+            g.drawText (value, r, juce::Justification::centredRight);
+        };
+
+        const bool hasCrest = peak[i] > scaleMin - 20.0f && average[i] > scaleMin - 20.0f;
+        row ("PEAK", fmt (hold[i]), peakColour);
+        row ("AVG", fmt (average[i]), zoneColour (average[i]));
+        row ("P-A", hasCrest ? juce::String (juce::jmax (0.0f, peak[i] - average[i]), 1) : juce::String ("--"), Theme::arcAccent);
+    }
+
+    g.setColour (juce::Colours::white.withAlpha (0.28f));
+    g.setFont (Theme::font (juce::jmax (6.5f, 8.0f * s), true));
+    g.drawText ("NEW CONSTELLATION", window.reduced (8.0f * s, 4.0f * s), juce::Justification::bottomLeft);
 }
