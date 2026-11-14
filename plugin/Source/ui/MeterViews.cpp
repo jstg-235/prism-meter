@@ -514,6 +514,21 @@ void AnalogVuMeter::paint (juce::Graphics& g)
     constexpr float aspect = 1.45f; // width / height of one meter
     constexpr float gap = 12.0f;
 
+    if (meterHeightFor (getWidth(), getHeight(), numChannels) < 150.0f)
+    {
+        if (numChannels < 2)
+        {
+            drawEdgewise (g, area, 0, {});
+            return;
+        }
+
+        auto left = area.removeFromLeft ((area.getWidth() - 8.0f) * 0.5f);
+        area.removeFromLeft (8.0f);
+        drawEdgewise (g, left, 0, "L");
+        drawEdgewise (g, area, 1, "R");
+        return;
+    }
+
     if (numChannels < 2)
     {
         drawMeter (g, area, 0, {});
@@ -726,6 +741,157 @@ void AnalogVuMeter::drawMeter (juce::Graphics& g, juce::Rectangle<float> area, i
     g.setFont (Theme::mono (juce::jmax (10.0f, 14.0f * s), true));
     g.setColour (vu > 0.0f ? Theme::levelRed : Theme::vuAccent);
     g.drawText ((vu <= -40.0f ? juce::String ("-inf") : juce::String (vu, 1)) + " VU", readoutStrip, juce::Justification::centred);
+}
+
+void AnalogVuMeter::drawEdgewise (juce::Graphics& g, juce::Rectangle<float> bezel, int channel, const juce::String& label) const
+{
+    const float s = juce::jlimit (0.6f, 1.6f, bezel.getWidth() / 100.0f);
+    const auto ink = juce::Colour (0xff1c140a);
+    const auto red = juce::Colour (0xffc3241b);
+    const auto idx = static_cast<size_t> (channel);
+    const float vu = values[idx];
+
+    // --- Bezel
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a3d42), bezel.getX(), bezel.getY(),
+                                             juce::Colour (0xff141518), bezel.getRight(), bezel.getBottom(), false));
+    g.fillRoundedRectangle (bezel, 7.0f * s);
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    g.drawRoundedRectangle (bezel.reduced (1.0f), 7.0f * s, 1.0f);
+    g.setColour (juce::Colours::black);
+    g.drawRoundedRectangle (bezel, 7.0f * s, 1.2f);
+
+    const float lip = juce::jmax (5.0f, 8.0f * s);
+    auto inner = bezel.reduced (lip);
+    auto readoutStrip = inner.removeFromBottom (juce::jmax (16.0f, 20.0f * s));
+    inner.removeFromBottom (lip * 0.6f);
+    const auto window = inner;
+
+    g.saveState();
+    juce::Path windowPath;
+    windowPath.addRoundedRectangle (window, 4.0f * s);
+    g.reduceClipRegion (windowPath);
+
+    // --- Backlit face, lamp glow centred on the working part of the scale
+    const auto faceWarm = juce::Colour (0xfff7e3a6);
+    const auto faceEdge = juce::Colour (0xffd9a94e);
+    g.setGradientFill (juce::ColourGradient (faceWarm.brighter (0.08f), window.getCentreX(), window.getY() + window.getHeight() * 0.35f,
+                                             faceEdge, window.getX() - window.getWidth() * 0.3f, window.getBottom(), true));
+    g.fillRect (window);
+
+    // Header (PEAK lamp) and footer (VU legend, channel)
+    const float headH = 26.0f * s, footH = 34.0f * s;
+    auto scaleArea = window.withTrimmedTop (headH).withTrimmedBottom (footH);
+    const float top = scaleArea.getY() + 8.0f * s, bottom = scaleArea.getBottom() - 4.0f * s;
+    auto yFor = [&] (float v) { return bottom - needlePosition (v) * (bottom - top); };
+
+    const float lineX = window.getX() + window.getWidth() * 0.52f;
+
+    g.setColour (ink);
+    g.drawLine (lineX, yFor (-20.0f), lineX, yFor (0.0f), 1.5f * s);
+    g.setColour (red);
+    g.fillRect (juce::Rectangle<float> (lineX - 1.0f * s, yFor (3.0f), 6.0f * s, yFor (0.0f) - yFor (3.0f)));
+
+    struct Mark { float vu; bool numbered; };
+    static const Mark marks[] = {
+        { -20.0f, true }, { -15.0f, false }, { -10.0f, true }, { -8.0f, false }, { -7.0f, true }, { -6.0f, false },
+        { -5.0f, true }, { -4.0f, false }, { -3.0f, true }, { -2.0f, true }, { -1.0f, true }, { -0.5f, false },
+        { 0.0f, true }, { 0.5f, false }, { 1.0f, true }, { 1.5f, false }, { 2.0f, true }, { 2.5f, false }, { 3.0f, true }
+    };
+
+    // Skip numbers that would collide on a short scale.
+    const float minLabelGap = 11.0f * s;
+    float lastLabelY = 1.0e9f;
+    g.setFont (Theme::font (11.0f * s, true));
+    for (const auto& m : marks)
+    {
+        const float y = yFor (m.vu);
+        const bool hot = m.vu > 0.0f;
+        g.setColour (hot ? red : ink);
+        const float len = (m.numbered ? 9.0f : 5.0f) * s;
+        g.drawLine (lineX - len, y, lineX, y, (m.numbered ? 1.4f : 0.9f) * s);
+
+        if (m.numbered && (lastLabelY - y >= minLabelGap || juce::exactlyEqual (m.vu, 0.0f)))
+        {
+            lastLabelY = y;
+            const auto text = m.vu > 0.0f ? "+" + juce::String (juce::roundToInt (m.vu))
+                                          : juce::String (juce::roundToInt (std::abs (m.vu)));
+            g.drawText (text, juce::Rectangle<float> (lineX - len - 3.0f * s - 26.0f * s, y - 7.0f * s, 26.0f * s, 14.0f * s),
+                        juce::Justification::centredRight);
+        }
+    }
+
+    // Percent scale on the right of the line (100 % = 0 VU)
+    g.setFont (Theme::font (8.5f * s));
+    g.setColour (ink.withAlpha (0.55f));
+    for (int pct : { 20, 40, 60, 80, 100 })
+    {
+        const float y = yFor (20.0f * std::log10 (static_cast<float> (pct) / 100.0f));
+        g.drawLine (lineX + 7.0f * s, y, lineX + 11.0f * s, y, 0.9f * s);
+        g.drawText (juce::String (pct), juce::Rectangle<float> (lineX + 13.0f * s, y - 6.0f * s, 24.0f * s, 12.0f * s),
+                    juce::Justification::centredLeft);
+    }
+
+    // PEAK lamp
+    const bool lit = lampFrames[idx] > 0;
+    const auto lamp = juce::Rectangle<float> (9.0f * s, 9.0f * s).withPosition (window.getX() + 8.0f * s, window.getY() + 8.0f * s);
+    if (lit)
+    {
+        g.setColour (juce::Colour (0xffff3020).withAlpha (0.35f));
+        g.fillEllipse (lamp.expanded (4.0f * s));
+    }
+    g.setColour (lit ? juce::Colour (0xffff4a30) : juce::Colour (0xff5a1a12));
+    g.fillEllipse (lamp);
+    g.setColour (ink.withAlpha (0.6f));
+    g.drawEllipse (lamp, 1.0f);
+    g.setFont (Theme::font (8.5f * s, true));
+    g.setColour (ink.withAlpha (0.75f));
+    g.drawText ("PEAK", juce::Rectangle<float> (lamp.getRight() + 3.0f * s, lamp.getY() - 2.0f * s, 40.0f * s, lamp.getHeight() + 4.0f * s),
+                juce::Justification::centredLeft);
+
+    // Legend and channel
+    auto foot = window.withTop (window.getBottom() - footH);
+    g.setColour (ink.withAlpha (0.85f));
+    g.setFont (Theme::font (18.0f * s, true));
+    g.drawText ("VU", foot.withTrimmedRight (window.getWidth() * 0.25f), juce::Justification::centred);
+    if (label.isNotEmpty())
+    {
+        g.setFont (Theme::font (13.0f * s, true));
+        g.setColour (ink.withAlpha (0.8f));
+        g.drawText (label, foot.reduced (7.0f * s, 0.0f), juce::Justification::centredRight);
+    }
+
+    // Pointer: a horizontal needle across the face with a soft shadow
+    const float py = yFor (vu);
+    g.setColour (juce::Colours::black.withAlpha (0.22f));
+    g.drawLine (window.getX() + 4.0f * s, py + 3.0f * s, window.getRight() - 4.0f * s, py + 3.0f * s, 2.0f * s);
+    g.setColour (juce::Colour (0xff111111));
+    g.drawLine (window.getX() + 4.0f * s, py, window.getRight() - 4.0f * s, py, 1.8f * s);
+    juce::Path tipShape;
+    tipShape.addTriangle (lineX + 2.0f * s, py, lineX + 9.0f * s, py - 4.0f * s, lineX + 9.0f * s, py + 4.0f * s);
+    g.fillPath (tipShape);
+
+    // Glass
+    g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.30f), window.getX(), window.getY(),
+                                             juce::Colours::transparentBlack, window.getX(), window.getY() + 12.0f * s, false));
+    g.fillRect (window);
+    juce::Path glare;
+    glare.startNewSubPath (window.getX(), window.getY());
+    glare.lineTo (window.getX() + window.getWidth() * 0.55f, window.getY());
+    glare.lineTo (window.getX(), window.getY() + window.getHeight() * 0.45f);
+    glare.closeSubPath();
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.16f), window.getX(), window.getY(),
+                                             juce::Colours::white.withAlpha (0.0f), window.getX() + window.getWidth() * 0.4f,
+                                             window.getY() + window.getHeight() * 0.3f, false));
+    g.fillPath (glare);
+
+    g.restoreState();
+
+    // Numeric reading in the bezel
+    g.setColour (Theme::face);
+    g.fillRoundedRectangle (readoutStrip, 3.0f);
+    g.setFont (Theme::mono (juce::jlimit (9.0f, 14.0f, 12.0f * s), true));
+    g.setColour (vu > 0.0f ? Theme::levelRed : Theme::vuAccent);
+    g.drawText (vu <= -40.0f ? juce::String ("-inf") : juce::String (vu, 1), readoutStrip, juce::Justification::centred);
 }
 
 //==============================================================================
