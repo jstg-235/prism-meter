@@ -11,6 +11,7 @@ FetchContent_MakeAvailable(googletest)
 add_executable(prism_core_tests
     BallisticsTests.cpp
     KWeightingTests.cpp
+    LoudnessHistoryTests.cpp
     LoudnessTests.cpp
     SpectrumTests.cpp
     StereoTests.cpp

@@ -3,6 +3,7 @@
 #include "MeterState.h"
 
 #include <prism/Ballistics.h>
+#include <prism/LoudnessHistory.h>
 #include <prism/LoudnessMeter.h>
 #include <prism/StereoAnalyzer.h>
 #include <prism/TruePeakMeter.h>
@@ -21,6 +22,7 @@ namespace ParamIds
     inline constexpr const char* kScale = "kScale";
     inline constexpr const char* loudnessTarget = "loudnessTarget";
     inline constexpr const char* truePeakCeiling = "tpCeiling";
+    inline constexpr const char* radarTurn = "radarTurn";
 }
 
 /// Choice lists shared by the processor and editor. Order is part of saved state.
@@ -39,6 +41,10 @@ namespace Choices
 
     inline const juce::StringArray truePeakCeilings { "-0.1 dBTP", "-1.0 dBTP", "-2.0 dBTP" };
     inline constexpr std::array<float, 3> truePeakCeilingValues { -0.1f, -1.0f, -2.0f };
+
+    /// Time for one turn of the loudness radar.
+    inline const juce::StringArray radarTurns { "1 min", "2 min", "4 min", "10 min", "30 min", "60 min" };
+    inline constexpr std::array<float, 6> radarTurnMinutes { 1.0f, 2.0f, 4.0f, 10.0f, 30.0f, 60.0f };
 }
 
 class PrismMeterProcessor final : public juce::AudioProcessor
@@ -76,6 +82,10 @@ public:
     juce::AudioProcessorValueTreeState& getParameters() noexcept { return parameters; }
     MeterState& getMeterState() noexcept { return meterState; }
 
+    /// Short-term loudness, one point per 100 ms, for the radar. Written by the
+    /// audio thread, safe to read from the UI.
+    const prism::LoudnessHistory& getShortTermHistory() const noexcept { return shortTermHistory; }
+
     /// Safe to call from any thread; the audio thread performs the reset.
     void requestReset() noexcept { resetRequested.store (true); }
 
@@ -100,6 +110,8 @@ private:
     std::atomic<double> currentSampleRate { 48000.0 };
 
     prism::LoudnessMeter loudness;
+    prism::LoudnessHistory shortTermHistory;
+    std::uint64_t lastLoudnessStep = 0;
     prism::StereoAnalyzer stereo;
     std::array<prism::TruePeakMeter, MeterState::maxMeterChannels> truePeak;
     std::array<prism::VuMeter, MeterState::maxMeterChannels> vu;

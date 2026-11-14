@@ -13,7 +13,8 @@ enum class MeterKind
     phase,
     vu,
     ppm,
-    kSystem
+    kSystem,
+    radar
 };
 
 namespace MeterKinds
@@ -21,7 +22,8 @@ namespace MeterKinds
     inline const std::vector<MeterKind>& all()
     {
         static const std::vector<MeterKind> kinds { MeterKind::loudness, MeterKind::peakAverage, MeterKind::spectrum,
-                                                    MeterKind::phase, MeterKind::vu, MeterKind::ppm, MeterKind::kSystem };
+                                                    MeterKind::phase, MeterKind::vu, MeterKind::ppm, MeterKind::kSystem,
+                                                    MeterKind::radar };
         return kinds;
     }
 
@@ -37,6 +39,7 @@ namespace MeterKinds
             case MeterKind::vu:          return "vu";
             case MeterKind::ppm:         return "ppm";
             case MeterKind::kSystem:     return "kSystem";
+            case MeterKind::radar:       return "radar";
         }
         return "loudness";
     }
@@ -60,6 +63,7 @@ namespace MeterKinds
             case MeterKind::vu:          return "VU";
             case MeterKind::ppm:         return "PPM";
             case MeterKind::kSystem:     return "K-System";
+            case MeterKind::radar:       return "Loudness Radar";
         }
         return {};
     }

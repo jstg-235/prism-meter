@@ -2,6 +2,7 @@
 
 #include "Layouts.h"
 #include "MeterViews.h"
+#include "RadarView.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -9,6 +10,11 @@
 #include <memory>
 
 struct MeterState;
+
+namespace prism
+{
+    class LoudnessHistory;
+}
 
 /// Everything a meter needs for one UI tick. Built once per tick by the editor
 /// and shared by every slot, so several slots can show the same tool.
@@ -24,6 +30,7 @@ struct ModuleContext
     double sampleRate = 48000.0;
     bool historyTick = false;   ///< true at 10 Hz
     bool spectrumTilt = true;
+    const prism::LoudnessHistory* shortTermHistory = nullptr;   ///< 10 points a second, kept by the processor
 };
 
 /// A meter tool placed in a layout slot.

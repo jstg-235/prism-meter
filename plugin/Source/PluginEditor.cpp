@@ -186,6 +186,7 @@ void PrismMeterEditor::timerCallback()
     context.sampleRate = processor.getCurrentSampleRate();
     context.historyTick = (++tickCount % 3) == 0;
     context.spectrumTilt = tiltButton.getToggleState();
+    context.shortTermHistory = &processor.getShortTermHistory();
 
     for (auto& slot : slots)
         if (auto* m = slot->getModule())

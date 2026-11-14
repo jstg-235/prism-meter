@@ -91,6 +91,10 @@ public:
     double getMomentaryMax() const noexcept { return momentaryMax; }
     double getShortTermMax() const noexcept { return shortTermMax; }
 
+    /// Number of 100 ms steps completed since prepare() or reset(). Each step
+    /// updates the momentary and short-term values.
+    std::uint64_t getStepCount() const noexcept { return blocksSeen; }
+
 private:
     static constexpr int momentaryBlocks = 4;   // 4 x 100 ms
     static constexpr int shortTermBlocks = 30;  // 30 x 100 ms
