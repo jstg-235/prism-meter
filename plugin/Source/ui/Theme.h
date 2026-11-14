@@ -36,6 +36,7 @@ namespace Theme
     inline const juce::Colour vuAccent { 0xff7ddc5a };        // leaf green
     inline const juce::Colour ppmAccent { 0xffff7a45 };       // orange
     inline const juce::Colour kAccent { 0xff5b8cff };         // blue
+    inline const juce::Colour radarAccent { 0xffff5c9d };     // rose
 
     inline juce::Font font (float size, bool bold = false)
     {

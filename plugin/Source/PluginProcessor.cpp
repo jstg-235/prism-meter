@@ -25,6 +25,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PrismMeterProcessor::createP
                                                         Choices::loudnessTargets, 0));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIds::truePeakCeiling, 1 }, "True Peak Ceiling",
                                                         Choices::truePeakCeilings, 1));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ParamIds::radarTurn, 1 }, "Radar Turn Time",
+                                                        Choices::radarTurns, 2));
     return layout;
 }
 
@@ -44,6 +46,7 @@ void PrismMeterProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     const int numChannels = juce::jlimit (1, MeterState::maxMeterChannels, getTotalNumInputChannels());
 
     loudness.prepare (sampleRate, numChannels);
+    lastLoudnessStep = loudness.getStepCount();
     stereo.prepare (sampleRate);
 
     for (int ch = 0; ch < MeterState::maxMeterChannels; ++ch)
@@ -77,6 +80,7 @@ void PrismMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (resetRequested.exchange (false))
     {
         loudness.resetIntegrated();
+        shortTermHistory.clear();
         for (auto& tp : truePeak)
             tp.resetPeaks();
     }
@@ -95,6 +99,11 @@ void PrismMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const float* const* channels = buffer.getArrayOfReadPointers();
 
     loudness.process (channels, numChannels, numSamples);
+
+    // One radar point per 100 ms step. A block longer than a step repeats the
+    // newest value, which is all the meter kept.
+    for (const auto steps = loudness.getStepCount(); lastLoudnessStep < steps; ++lastLoudnessStep)
+        shortTermHistory.push (static_cast<float> (loudness.getShortTerm()));
 
     for (int ch = 0; ch < numChannels; ++ch)
     {

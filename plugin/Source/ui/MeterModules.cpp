@@ -49,6 +49,91 @@ namespace
     };
 
     //==========================================================================
+    class RadarModule final : public ViewModule<RadarView>
+    {
+    public:
+        RadarModule()
+        {
+            view.onTurnButtonClicked = [this] { showTurnMenu(); };
+        }
+
+        void update (const ModuleContext& c) override
+        {
+            params = &c.params;
+            const auto& s = c.state;
+
+            RadarView::Readings r;
+            r.momentary = s.momentary.load();
+            r.shortTerm = s.shortTerm.load();
+            r.integrated = s.integrated.load();
+            r.loudnessRange = s.loudnessRange.load();
+            r.truePeakMax = s.truePeakMax.load();
+            r.target = Choices::loudnessTargetValues[static_cast<size_t> (choiceIndex (c.params, ParamIds::loudnessTarget))];
+            r.truePeakCeiling = Choices::truePeakCeilingValues[static_cast<size_t> (choiceIndex (c.params, ParamIds::truePeakCeiling))];
+
+            const int turn = juce::jlimit (0, Choices::radarTurns.size() - 1, choiceIndex (c.params, ParamIds::radarTurn));
+            const int perTurn = juce::roundToInt (Choices::radarTurnMinutes[static_cast<size_t> (turn)] * 600.0f);
+            if (turn != lastTurn)
+            {
+                lastTurn = turn;
+                view.setTurnLabel (Choices::radarTurns[turn] + " / turn");
+            }
+
+            if (c.shortTermHistory != nullptr)
+            {
+                r.elapsedSeconds = static_cast<double> (c.shortTermHistory->size()) / 10.0;
+                view.setReadings (r);
+
+                // The sweep only changes at the 10 Hz loudness step.
+                const auto size = c.shortTermHistory->size();
+                if (size != lastSize || turn != lastDrawnTurn || ! juce::exactlyEqual (r.target, lastTarget))
+                {
+                    lastSize = size;
+                    lastDrawnTurn = turn;
+                    lastTarget = r.target;
+                    points.resize (static_cast<size_t> (perTurn));
+                    std::uint64_t first = 0;
+                    const int n = c.shortTermHistory->readLatest (points.data(), perTurn, first);
+                    view.setHistory (points.data(), n, first, perTurn);
+                }
+            }
+            else
+            {
+                view.setReadings (r);
+            }
+
+            view.repaint();
+        }
+
+    private:
+        void showTurnMenu()
+        {
+            if (params == nullptr)
+                return;
+
+            juce::PopupMenu menu;
+            menu.addSectionHeader ("One turn of the radar");
+            for (int i = 0; i < Choices::radarTurns.size(); ++i)
+                menu.addItem (i + 1, Choices::radarTurns[i], true, i == lastTurn);
+
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (view.getTurnButton()),
+                                [safeThis = juce::Component::SafePointer<RadarModule> (this)] (int result)
+                                {
+                                    if (safeThis == nullptr || result <= 0 || safeThis->params == nullptr)
+                                        return;
+                                    if (auto* p = safeThis->params->getParameter (ParamIds::radarTurn))
+                                        p->setValueNotifyingHost (p->convertTo0to1 (static_cast<float> (result - 1)));
+                                });
+        }
+
+        juce::AudioProcessorValueTreeState* params = nullptr;
+        std::vector<float> points;
+        std::uint64_t lastSize = ~std::uint64_t (0);
+        int lastTurn = -1, lastDrawnTurn = -1;
+        float lastTarget = 0.0f;
+    };
+
+    //==========================================================================
     class PeakAverageModule final : public ViewModule<NeedleGauge>
     {
     public:
@@ -218,6 +303,7 @@ std::unique_ptr<MeterModule> MeterModule::create (MeterKind kind)
         case MeterKind::vu:
         case MeterKind::ppm:
         case MeterKind::kSystem:     return std::make_unique<BankModule> (kind);
+        case MeterKind::radar:       return std::make_unique<RadarModule>();
     }
     return std::make_unique<LoudnessModule>();
 }
