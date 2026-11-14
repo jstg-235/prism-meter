@@ -73,6 +73,14 @@ The DSP lives in `core/` so it can be tested quickly without a host. The audio
 thread never allocates or locks: readings reach the UI through atomics and the
 spectrum through a lock-free FIFO.
 
+## Installing a test build
+
+Download the latest `.pkg` from the Releases page, or from the **macOS build**
+workflow on the Actions tab. See [docs/INSTALL-macOS.md](docs/INSTALL-macOS.md)
+for installing, the one-time macOS security approval, and finding the plugin in
+Logic and Ableton. To make a new test build: Actions > macOS build > Run
+workflow (leave "Publish" ticked).
+
 ## Building
 
 Prism Meter targets **macOS** (universal binary, Apple silicon and Intel, macOS
