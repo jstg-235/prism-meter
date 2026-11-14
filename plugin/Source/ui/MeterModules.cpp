@@ -134,11 +134,15 @@ namespace
     };
 
     //==========================================================================
-    /// Arc LED peak + average, on the mono sum or on L and R.
-    class ArcModule final : public ViewModule<ArcLedMeter>
+    /// LED peak + average (bar or arc), on the mono sum or on L and R.
+    class LedPeakAverageModule final : public ViewModule<LedPeakAverageMeter>
     {
     public:
-        explicit ArcModule (bool isStereo) : stereo (isStereo) {}
+        explicit LedPeakAverageModule (bool isStereo, LedPeakAverageMeter::Shape shape = LedPeakAverageMeter::Shape::arc)
+            : stereo (isStereo), prefix (shape == LedPeakAverageMeter::Shape::arc ? "Arched LED Peak + Average" : "LED Bar Peak + Average")
+        {
+            view.setShape (shape);
+        }
 
         void update (const ModuleContext& c) override
         {
@@ -156,7 +160,8 @@ namespace
 
             if (stereo && channels == 2)
             {
-                view.setTitle ("Arc Peak + Average  stereo");
+                view.setTitle (prefix + "  stereo");
+                view.setPhaseAlarm (c.state.correlation.load() < 0.0f);
                 view.setNumFaces (2);
                 view.setFaceLabel (0, "L");
                 view.setFaceLabel (1, "R");
@@ -168,7 +173,7 @@ namespace
             }
             else
             {
-                view.setTitle (channels == 2 ? "Arc Peak + Average  mono sum" : "Arc Peak + Average  mono");
+                view.setTitle (prefix + (channels == 2 ? "  mono sum" : "  mono"));
                 view.setNumFaces (1);
                 view.setFaceLabel (0, channels == 2 ? "L + R" : "MONO");
                 const bool over = c.state.channels[0].truePeak.load() > ceiling
@@ -181,6 +186,7 @@ namespace
 
     private:
         bool stereo;
+        juce::String prefix;
         int lastChoice = -1;
         float reference = -18.0f;
     };
@@ -321,6 +327,8 @@ namespace
                     case MeterKind::peakAverage:
                     case MeterKind::arcMono:
                     case MeterKind::arcStereo:
+                    case MeterKind::barMono:
+                    case MeterKind::barStereo:
                     case MeterKind::spectrum:
                     case MeterKind::phase:
                     default:             bank.setValue (ch, s.rms.load() - reference); break;
@@ -364,6 +372,8 @@ namespace
                 case MeterKind::peakAverage:
                 case MeterKind::arcMono:
                 case MeterKind::arcStereo:
+                case MeterKind::barMono:
+                case MeterKind::barStereo:
                 case MeterKind::spectrum:
                 case MeterKind::phase:
                 default:
@@ -394,8 +404,10 @@ std::unique_ptr<MeterModule> MeterModule::create (MeterKind kind)
         case MeterKind::ppm:
         case MeterKind::kSystem:     return std::make_unique<BankModule> (kind);
         case MeterKind::radar:       return std::make_unique<RadarModule>();
-        case MeterKind::arcMono:     return std::make_unique<ArcModule> (false);
-        case MeterKind::arcStereo:   return std::make_unique<ArcModule> (true);
+        case MeterKind::arcMono:     return std::make_unique<LedPeakAverageModule> (false);
+        case MeterKind::arcStereo:   return std::make_unique<LedPeakAverageModule> (true);
+        case MeterKind::barMono:     return std::make_unique<LedPeakAverageModule> (false, LedPeakAverageMeter::Shape::bar);
+        case MeterKind::barStereo:   return std::make_unique<LedPeakAverageModule> (true, LedPeakAverageMeter::Shape::bar);
     }
     return std::make_unique<LoudnessModule>();
 }

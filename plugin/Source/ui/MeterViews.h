@@ -97,18 +97,26 @@ private:
 };
 
 //==============================================================================
-/// Arc LED peak + average meter (our design, after the public idea of showing
-/// peak and average at once on one LED arc). Each face is a ring of LED
-/// segments: the average lights as a solid bar, the peak as a single bright
-/// dot riding above it, so the gap between them is the crest factor. A thin
-/// outer marker holds the highest peak for two seconds, an OVER lamp follows
-/// the true-peak ceiling, and the centre shows peak, average and crest.
+/// LED peak + average meter (our design, after the public idea of showing
+/// peak and average at once on one LED display). The average lights as a
+/// solid bar of LEDs in green / amber / red, and the peak as a single LED in
+/// a contrasting ice-white riding above it, so the gap between them is the
+/// crest factor. A dimmer marker holds the highest peak for two seconds, an
+/// OVER lamp follows the true-peak ceiling, and readouts give peak, average
+/// and crest.
 ///
-/// One face for a mono (or mono-sum) meter, two for stereo, side by side or
-/// stacked, whichever gives the larger faces.
-class ArcLedMeter final : public juce::Component
+/// Two shapes: long straight bar graphs (horizontal, or vertical in tall
+/// slots) with a calibrated scale between them, or a wide arched LED monitor
+/// per channel in a recessed bezel (one LED per dB, -25 to +20, with a
+/// dB-re-reference scale above and a dBFS scale below). Clicking the meter
+/// cycles peak hold: auto 3 s, hold until reset, off.
+/// One channel for a mono (or mono-sum) meter, two for stereo.
+class LedPeakAverageMeter final : public juce::Component
 {
 public:
+    enum class Shape { bar, arc };
+    void setShape (Shape newShape) { shape = newShape; }
+
     void setTitle (juce::String newTitle);
     void setNumFaces (int n);
 
@@ -118,6 +126,10 @@ public:
     void setFullScale (float relDb);
     void setFaceLabel (int face, juce::String label);
     void setReferenceText (juce::String text);
+    void setPhaseAlarm (bool alarm) { phaseAlarm = alarm; }
+
+    enum class HoldMode { autoReset, untilReset, off };
+    void mouseDown (const juce::MouseEvent&) override;
 
     void paint (juce::Graphics&) override;
 
@@ -126,16 +138,23 @@ public:
     /// gets most of the LEDs.
     static float arcPosition (float relDb) noexcept;
 
-    static constexpr int numSegments = 60;
+    static constexpr float archedAspect = 3.0f;
+    static constexpr int numBarSegments = 96;
+    static const juce::Colour peakColour;
     static constexpr float scaleMin = -40.0f, scaleMax = 20.0f;
 
 private:
-    void drawFace (juce::Graphics&, juce::Rectangle<float> area, int face) const;
+    void drawFace (juce::Graphics&, juce::Rectangle<float> area, int face, bool ownPlate) const;
+    void drawBars (juce::Graphics&, juce::Rectangle<float> area) const;
     juce::Colour zoneColour (float relDb) const noexcept;
+    juce::Colour archedLedColour (float relDb) const noexcept;
 
-    juce::String title { "Arc Peak + Average" };
+    Shape shape = Shape::bar;
+    juce::String title { "Peak + Average" };
     juce::String referenceText;
     int numFaces = 2;
+    HoldMode holdMode = HoldMode::autoReset;
+    bool phaseAlarm = false;
     float fullScale = 18.0f;
     std::array<float, 2> peak { -60.0f, -60.0f }, average { -60.0f, -60.0f }, hold { -60.0f, -60.0f };
     std::array<int, 2> holdFrames { 0, 0 }, overFrames { 0, 0 };

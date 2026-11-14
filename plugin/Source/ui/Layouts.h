@@ -16,7 +16,9 @@ enum class MeterKind
     kSystem,
     radar,
     arcMono,
-    arcStereo
+    arcStereo,
+    barMono,
+    barStereo
 };
 
 namespace MeterKinds
@@ -25,7 +27,8 @@ namespace MeterKinds
     {
         static const std::vector<MeterKind> kinds { MeterKind::loudness, MeterKind::peakAverage, MeterKind::spectrum,
                                                     MeterKind::phase, MeterKind::vu, MeterKind::ppm, MeterKind::kSystem,
-                                                    MeterKind::radar, MeterKind::arcMono, MeterKind::arcStereo };
+                                                    MeterKind::radar, MeterKind::barMono, MeterKind::barStereo,
+                                                    MeterKind::arcMono, MeterKind::arcStereo };
         return kinds;
     }
 
@@ -44,6 +47,8 @@ namespace MeterKinds
             case MeterKind::radar:       return "radar";
             case MeterKind::arcMono:     return "arcMono";
             case MeterKind::arcStereo:   return "arcStereo";
+            case MeterKind::barMono:     return "barMono";
+            case MeterKind::barStereo:   return "barStereo";
         }
         return "loudness";
     }
@@ -68,8 +73,10 @@ namespace MeterKinds
             case MeterKind::ppm:         return "PPM";
             case MeterKind::kSystem:     return "K-System";
             case MeterKind::radar:       return "Loudness Radar";
-            case MeterKind::arcMono:     return "Arc LED Peak + Average (mono)";
-            case MeterKind::arcStereo:   return "Arc LED Peak + Average (stereo)";
+            case MeterKind::arcMono:     return "Arched LED Peak + Average (mono)";
+            case MeterKind::arcStereo:   return "Arched LED Peak + Average (stereo)";
+            case MeterKind::barMono:     return "LED Bar Peak + Average (mono)";
+            case MeterKind::barStereo:   return "LED Bar Peak + Average (stereo)";
         }
         return {};
     }
@@ -118,14 +125,26 @@ namespace DisplayPresets
               { 1.0f }, { 1.0f },
               { { 0, 0, 1, 1, K::peakAverage } } },
 
-            { "wide12-arc-stereo", "12\" widescreen: stereo arc LED Peak + Average",
-              "Two LED arc meters, L and R, each showing peak and average at once.",
+            { "wide12-bar-stereo", "12\" widescreen: stereo LED bar Peak + Average",
+              "Two long LED bar graphs, L and R, each showing peak and average at once on a calibrated scale.",
+              1280, 720,
+              { 1.0f }, { 1.0f },
+              { { 0, 0, 1, 1, K::barStereo } } },
+
+            { "wide12-bar-mono", "12\" widescreen: mono LED bar Peak + Average",
+              "One long LED bar graph on the mono sum, peak and average at once.",
+              1280, 720,
+              { 1.0f }, { 1.0f },
+              { { 0, 0, 1, 1, K::barMono } } },
+
+            { "wide12-arc-stereo", "12\" widescreen: stereo arched LED Peak + Average",
+              "Two wide arched LED monitors side by side, L and R, each showing average and peak at once.",
               1280, 720,
               { 1.0f }, { 1.0f },
               { { 0, 0, 1, 1, K::arcStereo } } },
 
-            { "wide12-arc-mono", "12\" widescreen: mono arc LED Peak + Average",
-              "One large LED arc meter on the mono sum, peak and average at once.",
+            { "wide12-arc-mono", "12\" widescreen: mono arched LED Peak + Average",
+              "One wide arched LED monitor on the mono sum, average and peak at once.",
               1280, 720,
               { 1.0f }, { 1.0f },
               { { 0, 0, 1, 1, K::arcMono } } },
