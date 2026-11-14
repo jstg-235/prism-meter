@@ -1,6 +1,7 @@
 add_library(prism_core STATIC
     src/Ballistics.cpp
     src/KWeighting.cpp
+    src/LoudnessHistory.cpp
     src/LoudnessMeter.cpp
     src/SpectrumAnalyzer.cpp
     src/StereoAnalyzer.cpp

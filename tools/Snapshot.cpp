@@ -2,6 +2,9 @@
 // Developer tool for docs and visual checks:
 //   PrismSnapshot <output.png>            current layout
 //   PrismSnapshot --all-presets <dir>     one PNG per display preset
+//   PrismSnapshot --layout <presetId> <meterId,meterId,...> <output.png> [seconds]
+//                                         a preset with chosen meters in its slots,
+//                                         after [seconds] of programme (default 12)
 
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
@@ -16,7 +19,9 @@ int main (int argc, char** argv)
 
     const auto cwd = juce::File::getCurrentWorkingDirectory();
     const bool allPresets = argc > 1 && juce::String (argv[1]) == "--all-presets";
-    const juce::File output = allPresets ? cwd.getChildFile (argc > 2 ? argv[2] : "presets")
+    const bool customLayout = argc > 4 && juce::String (argv[1]) == "--layout";
+    const juce::File output = customLayout ? cwd.getChildFile (argv[4])
+                            : allPresets ? cwd.getChildFile (argc > 2 ? argv[2] : "presets")
                                          : cwd.getChildFile (argc > 1 ? argv[1] : "prism-meter.png");
 
     constexpr double sampleRate = 48000.0;
@@ -58,7 +63,14 @@ int main (int argc, char** argv)
         }
     };
 
-    renderSeconds (12.0);
+    renderSeconds (customLayout && argc > 5 ? juce::String (argv[5]).getDoubleValue() : 12.0);
+
+    if (customLayout)
+    {
+        auto layout = processor.getParameters().state.getOrCreateChildWithName ("Layout", nullptr);
+        layout.setProperty ("preset", juce::String (argv[2]), nullptr);
+        layout.setProperty ("slots", juce::String (argv[3]), nullptr);
+    }
 
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     auto* prism = dynamic_cast<PrismMeterEditor*> (editor.get());
