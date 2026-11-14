@@ -116,12 +116,16 @@ public:
     /// -20 VU at 0 and +3 VU at 1), allowed to pin slightly past both ends.
     static float needlePosition (float vu) noexcept;
 
-    /// Height of each meter face this component would draw at the given size.
-    /// Callers use it to fall back to bars when the faces would be too small.
+    /// Height of each round-scale meter face at the given size; below about
+    /// 150 px the component switches to the edgewise form.
     static float meterHeightFor (int width, int height, int numChannels) noexcept;
 
 private:
     void drawMeter (juce::Graphics&, juce::Rectangle<float> area, int channel, const juce::String& label) const;
+
+    /// Tall edgewise form of the same meter (vertical scale, horizontal
+    /// pointer) for narrow slots such as console columns.
+    void drawEdgewise (juce::Graphics&, juce::Rectangle<float> area, int channel, const juce::String& label) const;
 
     juce::String title { "VU" };
     int numChannels = 2;
