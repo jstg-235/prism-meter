@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-24.04, macos-15]
     steps:
       - uses: actions/checkout@v4
       - name: Configure
@@ -25,7 +25,7 @@ jobs:
   # The product ships on macOS only for now (VST3 + AU, universal binary).
   plugin:
     name: Plugin build (macOS universal)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Configure
