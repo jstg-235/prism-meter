@@ -97,6 +97,39 @@ private:
 };
 
 //==============================================================================
+/// Classic analogue VU meters, one per channel (our design): a backlit warm
+/// face behind glass in a dark bezel, the standard -20 to +3 VU scale laid out
+/// on the voltage law with a red zone above 0 VU, a secondary percent scale,
+/// a PEAK lamp per channel and a numeric reading under each meter.
+class AnalogVuMeter final : public juce::Component
+{
+public:
+    void setTitle (juce::String newTitle);
+    void setNumChannels (int n);
+
+    /// vu is in VU (0 = the reference level); peakOver lights the PEAK lamp.
+    void setValue (int channel, float vu, bool peakOver);
+
+    void paint (juce::Graphics&) override;
+
+    /// Needle position 0..1 across the scale for a VU value (voltage law,
+    /// -20 VU at 0 and +3 VU at 1), allowed to pin slightly past both ends.
+    static float needlePosition (float vu) noexcept;
+
+    /// Height of each meter face this component would draw at the given size.
+    /// Callers use it to fall back to bars when the faces would be too small.
+    static float meterHeightFor (int width, int height, int numChannels) noexcept;
+
+private:
+    void drawMeter (juce::Graphics&, juce::Rectangle<float> area, int channel, const juce::String& label) const;
+
+    juce::String title { "VU" };
+    int numChannels = 2;
+    std::array<float, 2> values { -40.0f, -40.0f };
+    std::array<int, 2> lampFrames { 0, 0 };
+};
+
+//==============================================================================
 /// Vectorscope (mid up, side across) with phosphor persistence, plus the
 /// correlation bar and balance / width readouts.
 class PhasePanel final : public juce::Component

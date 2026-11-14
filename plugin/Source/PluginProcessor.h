@@ -106,6 +106,11 @@ private:
     std::array<prism::PpmMeter, MeterState::maxMeterChannels> ppm;
     std::array<prism::RmsMeter, MeterState::maxMeterChannels> rms;
     std::array<prism::DualNeedleMeter, MeterState::maxMeterChannels> needles;
+
+    // Recent true peak per channel, held so the UI (30 Hz) never misses an over.
+    std::array<float, MeterState::maxMeterChannels> recentPeakGain {};
+    std::array<int, MeterState::maxMeterChannels> recentPeakAge {};
+    int peakHoldSamples = 14400;
     int lastPpmType = -1;
 
     static constexpr int spectrumFifoSize = 1 << 15;
