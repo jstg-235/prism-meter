@@ -14,12 +14,15 @@ else()
     FetchContent_MakeAvailable(JUCE)
 endif()
 
+# Product target: macOS, VST3 + AU. Standalone is kept for testing without a DAW.
+# Other platforms build VST3 + Standalone for development only.
 set(PRISM_FORMATS VST3 Standalone)
 if(APPLE)
     list(APPEND PRISM_FORMATS AU)
 endif()
 
-# AAX needs the Avid SDK (developer account). Set PRISM_AAX_SDK to enable it.
+# AAX is planned for the end of the roadmap. It needs the Avid SDK (developer
+# account) and PACE signing. Set PRISM_AAX_SDK to try it early.
 set(PRISM_AAX_SDK "" CACHE PATH "Path to the Avid AAX SDK")
 if(PRISM_AAX_SDK)
     juce_set_aax_sdk_path(${PRISM_AAX_SDK})
@@ -27,10 +30,10 @@ if(PRISM_AAX_SDK)
 endif()
 
 juce_add_plugin(PrismMeter
-    COMPANY_NAME "Prism Audio"
+    COMPANY_NAME "New Constellation"
     COMPANY_WEBSITE ""
-    BUNDLE_ID "com.prismaudio.prismmeter"
-    PLUGIN_MANUFACTURER_CODE Prsm
+    BUNDLE_ID "com.newconstellation.prismmeter"
+    PLUGIN_MANUFACTURER_CODE NwCn
     PLUGIN_CODE PrMt
     PRODUCT_NAME "Prism Meter"
     FORMATS ${PRISM_FORMATS}
@@ -49,6 +52,7 @@ target_sources(PrismMeter PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/ui/MeterViews.cpp
+    Source/ui/MeterModules.cpp
 )
 
 target_include_directories(PrismMeter PRIVATE Source)
@@ -82,6 +86,7 @@ if(PRISM_BUILD_SNAPSHOT_TOOL)
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
         Source/ui/MeterViews.cpp
+        Source/ui/MeterModules.cpp
     )
 
     target_include_directories(PrismSnapshot PRIVATE Source)

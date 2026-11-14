@@ -60,6 +60,7 @@ void PrismMeterProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     lastPpmType = -1;
     monoScratch.assign (static_cast<size_t> (juce::jmax (1, samplesPerBlock)), 0.0f);
     spectrumFifo.reset();
+    scopeFifo.reset();
     meterState.numChannels.store (numChannels);
 }
 
@@ -109,6 +110,7 @@ void PrismMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         stereo.process (channels[0], channels[1], numSamples);
 
     pushSpectrumSamples (channels, numChannels, numSamples);
+    pushScopeSamples (channels, numChannels, numSamples);
     publishReadings (numChannels);
 }
 
@@ -179,6 +181,41 @@ void PrismMeterProcessor::pushSpectrumSamples (const float* const* channels, int
         if (scope.blockSize2 > 0)
             std::copy_n (monoScratch.data() + scope.blockSize1, scope.blockSize2, spectrumBuffer.data() + scope.startIndex2);
     }
+}
+
+void PrismMeterProcessor::pushScopeSamples (const float* const* channels, int numChannels, int numSamples) noexcept
+{
+    const float* left = channels[0];
+    const float* right = channels[numChannels > 1 ? 1 : 0];
+
+    // Drop what does not fit rather than block when the editor is closed.
+    const auto scope = scopeFifo.write (juce::jmin (numSamples, scopeFifo.getFreeSpace()));
+    if (scope.blockSize1 > 0)
+    {
+        std::copy_n (left, scope.blockSize1, scopeLeft.data() + scope.startIndex1);
+        std::copy_n (right, scope.blockSize1, scopeRight.data() + scope.startIndex1);
+    }
+    if (scope.blockSize2 > 0)
+    {
+        std::copy_n (left + scope.blockSize1, scope.blockSize2, scopeLeft.data() + scope.startIndex2);
+        std::copy_n (right + scope.blockSize1, scope.blockSize2, scopeRight.data() + scope.startIndex2);
+    }
+}
+
+int PrismMeterProcessor::readScopeSamples (float* left, float* right, int maxSamples) noexcept
+{
+    const auto scope = scopeFifo.read (juce::jmin (maxSamples, scopeFifo.getNumReady()));
+    if (scope.blockSize1 > 0)
+    {
+        std::copy_n (scopeLeft.data() + scope.startIndex1, scope.blockSize1, left);
+        std::copy_n (scopeRight.data() + scope.startIndex1, scope.blockSize1, right);
+    }
+    if (scope.blockSize2 > 0)
+    {
+        std::copy_n (scopeLeft.data() + scope.startIndex2, scope.blockSize2, left + scope.blockSize1);
+        std::copy_n (scopeRight.data() + scope.startIndex2, scope.blockSize2, right + scope.blockSize1);
+    }
+    return scope.blockSize1 + scope.blockSize2;
 }
 
 int PrismMeterProcessor::readSpectrumSamples (float* dest, int maxSamples) noexcept

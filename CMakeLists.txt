@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 
+# macOS is the product platform: universal binary (Apple silicon + Intel).
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum macOS version")
+set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures")
+
 project(PrismMeter VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
