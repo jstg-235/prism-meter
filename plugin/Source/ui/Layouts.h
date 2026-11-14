@@ -14,7 +14,9 @@ enum class MeterKind
     vu,
     ppm,
     kSystem,
-    radar
+    radar,
+    arcMono,
+    arcStereo
 };
 
 namespace MeterKinds
@@ -23,7 +25,7 @@ namespace MeterKinds
     {
         static const std::vector<MeterKind> kinds { MeterKind::loudness, MeterKind::peakAverage, MeterKind::spectrum,
                                                     MeterKind::phase, MeterKind::vu, MeterKind::ppm, MeterKind::kSystem,
-                                                    MeterKind::radar };
+                                                    MeterKind::radar, MeterKind::arcMono, MeterKind::arcStereo };
         return kinds;
     }
 
@@ -40,6 +42,8 @@ namespace MeterKinds
             case MeterKind::ppm:         return "ppm";
             case MeterKind::kSystem:     return "kSystem";
             case MeterKind::radar:       return "radar";
+            case MeterKind::arcMono:     return "arcMono";
+            case MeterKind::arcStereo:   return "arcStereo";
         }
         return "loudness";
     }
@@ -64,6 +68,8 @@ namespace MeterKinds
             case MeterKind::ppm:         return "PPM";
             case MeterKind::kSystem:     return "K-System";
             case MeterKind::radar:       return "Loudness Radar";
+            case MeterKind::arcMono:     return "Arc LED Peak + Average (mono)";
+            case MeterKind::arcStereo:   return "Arc LED Peak + Average (stereo)";
         }
         return {};
     }
@@ -111,6 +117,18 @@ namespace DisplayPresets
               1280, 720,
               { 1.0f }, { 1.0f },
               { { 0, 0, 1, 1, K::peakAverage } } },
+
+            { "wide12-arc-stereo", "12\" widescreen: stereo arc LED Peak + Average",
+              "Two LED arc meters, L and R, each showing peak and average at once.",
+              1280, 720,
+              { 1.0f }, { 1.0f },
+              { { 0, 0, 1, 1, K::arcStereo } } },
+
+            { "wide12-arc-mono", "12\" widescreen: mono arc LED Peak + Average",
+              "One large LED arc meter on the mono sum, peak and average at once.",
+              1280, 720,
+              { 1.0f }, { 1.0f },
+              { { 0, 0, 1, 1, K::arcMono } } },
 
             { "wide12-vu", "12\" widescreen: stereo VU", "A pair of large analogue VU meters, L and R.",
               1280, 720,

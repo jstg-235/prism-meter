@@ -118,6 +118,7 @@ private:
     std::array<prism::PpmMeter, MeterState::maxMeterChannels> ppm;
     std::array<prism::RmsMeter, MeterState::maxMeterChannels> rms;
     std::array<prism::DualNeedleMeter, MeterState::maxMeterChannels> needles;
+    prism::DualNeedleMeter monoNeedle;
 
     // Recent true peak per channel, held so the UI (30 Hz) never misses an over.
     std::array<float, MeterState::maxMeterChannels> recentPeakGain {};

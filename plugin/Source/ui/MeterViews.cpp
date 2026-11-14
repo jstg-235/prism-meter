@@ -1183,3 +1183,299 @@ void SpectrumView::paint (juce::Graphics& g)
     g.setColour (Theme::textSecondary);
     g.drawText ("time", sgPlot.reduced (4.0f, 2.0f), juce::Justification::bottomRight);
 }
+
+//==============================================================================
+void ArcLedMeter::setTitle (juce::String newTitle) { title = std::move (newTitle); }
+void ArcLedMeter::setNumFaces (int n) { numFaces = juce::jlimit (1, 2, n); }
+void ArcLedMeter::setFullScale (float relDb) { fullScale = relDb; }
+void ArcLedMeter::setReferenceText (juce::String text) { referenceText = std::move (text); }
+
+void ArcLedMeter::setFaceLabel (int face, juce::String label)
+{
+    labels[static_cast<size_t> (juce::jlimit (0, 1, face))] = std::move (label);
+}
+
+void ArcLedMeter::setValues (int face, float peakRel, float averageRel, bool over)
+{
+    const auto i = static_cast<size_t> (juce::jlimit (0, 1, face));
+    peak[i] = peakRel;
+    average[i] = averageRel;
+
+    // Peak hold: two seconds at the 30 Hz UI rate, then let go.
+    if (peakRel >= hold[i] || holdFrames[i] <= 0)
+    {
+        hold[i] = peakRel;
+        holdFrames[i] = 60;
+    }
+    else
+    {
+        --holdFrames[i];
+    }
+
+    // The OVER lamp stays lit for a second so a single over is not missed.
+    overFrames[i] = over ? 30 : juce::jmax (0, overFrames[i] - 1);
+}
+
+float ArcLedMeter::arcPosition (float relDb) noexcept
+{
+    // Piecewise-linear scale (our design): -40..-20 squeezed into the first
+    // fifth, the working range around 0 spread wide, headroom to +20.
+    static constexpr std::array<std::pair<float, float>, 9> points { {
+        { -40.0f, 0.00f }, { -30.0f, 0.08f }, { -20.0f, 0.18f }, { -10.0f, 0.36f }, { -5.0f, 0.49f },
+        { 0.0f, 0.63f }, { 5.0f, 0.75f }, { 10.0f, 0.86f }, { 20.0f, 1.00f } } };
+
+    if (relDb <= points.front().first)
+        return 0.0f;
+
+    for (size_t i = 1; i < points.size(); ++i)
+    {
+        if (relDb <= points[i].first)
+        {
+            const auto [x0, y0] = points[i - 1];
+            const auto [x1, y1] = points[i];
+            return y0 + (relDb - x0) / (x1 - x0) * (y1 - y0);
+        }
+    }
+
+    return 1.0f;
+}
+
+juce::Colour ArcLedMeter::zoneColour (float relDb) const noexcept
+{
+    if (relDb >= fullScale - 6.0f)
+        return Theme::levelRed;
+    if (relDb >= 0.0f)
+        return Theme::levelYellow;
+    return Theme::levelGreen;
+}
+
+void ArcLedMeter::paint (juce::Graphics& g)
+{
+    auto area = Theme::drawPanel (g, getLocalBounds().toFloat(), title, Theme::arcAccent).reduced (10.0f);
+
+    if (referenceText.isNotEmpty())
+    {
+        g.setColour (Theme::textSecondary);
+        g.setFont (Theme::font (11.0f));
+        g.drawText (referenceText, area.removeFromBottom (16.0f), juce::Justification::centredRight);
+        area.removeFromBottom (4.0f);
+    }
+
+    constexpr float aspect = 1.15f; // width / height of one face
+    constexpr float gap = 12.0f;
+
+    if (numFaces < 2)
+    {
+        drawFace (g, area, 0);
+        return;
+    }
+
+    const float sideH = juce::jmin (area.getHeight(), (area.getWidth() - gap) * 0.5f / aspect);
+    const float stackH = juce::jmin ((area.getHeight() - gap) * 0.5f, area.getWidth() / aspect);
+
+    if (sideH >= stackH)
+    {
+        auto left = area.removeFromLeft ((area.getWidth() - gap) * 0.5f);
+        area.removeFromLeft (gap);
+        drawFace (g, left, 0);
+        drawFace (g, area, 1);
+    }
+    else
+    {
+        auto top = area.removeFromTop ((area.getHeight() - gap) * 0.5f);
+        area.removeFromTop (gap);
+        drawFace (g, top, 0);
+        drawFace (g, area, 1);
+    }
+}
+
+void ArcLedMeter::drawFace (juce::Graphics& g, juce::Rectangle<float> area, int face) const
+{
+    constexpr float aspect = 1.15f;
+    const float h = juce::jmin (area.getHeight(), area.getWidth() / aspect);
+    if (h < 40.0f)
+        return;
+
+    auto bezel = area.withSizeKeepingCentre (h * aspect, h);
+    const float s = juce::jlimit (0.45f, 2.4f, h / 300.0f);
+    const auto i = static_cast<size_t> (face);
+
+    // --- Bezel: dark metal with a bevel and a thin accent trim
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a3d42), bezel.getX(), bezel.getY(),
+                                             juce::Colour (0xff131417), bezel.getX(), bezel.getBottom(), false));
+    g.fillRoundedRectangle (bezel, 10.0f * s);
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    g.drawRoundedRectangle (bezel.reduced (1.0f), 10.0f * s, 1.0f);
+    g.setColour (juce::Colours::black);
+    g.drawRoundedRectangle (bezel, 10.0f * s, 1.2f);
+
+    const float lip = juce::jmax (6.0f, 12.0f * s);
+    auto window = bezel.reduced (lip);
+    g.setColour (Theme::arcAccent.withAlpha (0.55f));
+    g.drawRoundedRectangle (window.expanded (2.5f), 6.0f * s, 1.0f);
+
+    // --- Black glass face
+    g.saveState();
+    juce::Path windowPath;
+    windowPath.addRoundedRectangle (window, 6.0f * s);
+    g.reduceClipRegion (windowPath);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff101317), window.getCentreX(), window.getCentreY(),
+                                             juce::Colour (0xff030405), window.getX(), window.getY(), true));
+    g.fillRect (window);
+
+    const juce::Point<float> centre (window.getCentreX(), window.getY() + window.getHeight() * 0.56f);
+    const float outerR = juce::jmin (window.getWidth() * 0.5f - 34.0f * s, window.getHeight() * 0.56f - 46.0f * s);
+    const float ledDepth = juce::jmax (8.0f, outerR * 0.16f);
+    const float innerR = outerR - ledDepth;
+    constexpr float sweep = juce::MathConstants<float>::pi * 1.42f; // ~256 degrees
+    const float startA = -sweep * 0.5f;
+
+    auto angleFor = [&] (float rel) { return startA + arcPosition (rel) * sweep; };
+    auto pointAt = [&] (float angle, float r)
+    {
+        return centre + juce::Point<float> (std::sin (angle) * r, -std::cos (angle) * r);
+    };
+
+    // --- LED segments. Segment k covers [k, k+1) / numSegments of the arc.
+    const float segAngle = sweep / static_cast<float> (numSegments);
+    const float avgPos = arcPosition (average[i]) * numSegments;
+    const float peakPos = arcPosition (peak[i]) * numSegments;
+    const int peakSeg = peak[i] > scaleMin ? juce::jlimit (0, numSegments - 1, static_cast<int> (peakPos)) : -1;
+
+    // Level at the centre of a segment, for its colour (inverse of arcPosition by search).
+    auto levelAtSegment = [] (int k)
+    {
+        const float target = (static_cast<float> (k) + 0.5f) / static_cast<float> (numSegments);
+        float lo = scaleMin, hi = scaleMax;
+        for (int it = 0; it < 24; ++it)
+        {
+            const float mid = 0.5f * (lo + hi);
+            (arcPosition (mid) < target ? lo : hi) = mid;
+        }
+        return 0.5f * (lo + hi);
+    };
+
+    for (int k = 0; k < numSegments; ++k)
+    {
+        const float a0 = startA + static_cast<float> (k) * segAngle + segAngle * 0.14f;
+        const float a1 = startA + static_cast<float> (k + 1) * segAngle - segAngle * 0.14f;
+        juce::Path seg;
+        seg.addCentredArc (centre.x, centre.y, outerR, outerR, 0.0f, a0, a1, true);
+        seg.addCentredArc (centre.x, centre.y, innerR, innerR, 0.0f, a1, a0, false);
+        seg.closeSubPath();
+
+        const auto colour = zoneColour (levelAtSegment (k));
+        const bool avgLit = static_cast<float> (k) < avgPos;
+        const bool isPeak = k == peakSeg;
+
+        if (isPeak)
+        {
+            // Peak dot: brightest, with a glow, whiter at the core.
+            g.setColour (colour.withAlpha (0.35f));
+            g.strokePath (seg, juce::PathStrokeType (5.0f * s));
+            g.setColour (colour.interpolatedWith (juce::Colours::white, 0.45f));
+        }
+        else if (avgLit)
+        {
+            g.setColour (colour.withAlpha (0.9f));
+        }
+        else
+        {
+            g.setColour (colour.withAlpha (0.10f)); // unlit LED stays faintly visible
+        }
+        g.fillPath (seg);
+    }
+
+    // --- Peak hold marker on a thin outer ring
+    const float holdR = outerR + 5.0f * s;
+    if (hold[i] > scaleMin)
+    {
+        const float a = angleFor (hold[i]);
+        g.setColour (zoneColour (hold[i]).interpolatedWith (juce::Colours::white, 0.3f));
+        g.drawLine ({ pointAt (a, holdR - 2.0f * s), pointAt (a, holdR + 4.0f * s) }, 3.0f * s);
+    }
+
+    // --- Scale: ticks and numbers outside the ring
+    g.setFont (Theme::font (juce::jmax (8.0f, 13.0f * s), true));
+    for (float rel : { -40.0f, -30.0f, -20.0f, -15.0f, -10.0f, -7.0f, -5.0f, -3.0f, 0.0f, 3.0f, 5.0f, 10.0f, 15.0f, 20.0f })
+    {
+        const float a = angleFor (rel);
+        const bool major = rel == 0.0f || std::fmod (std::abs (rel), 10.0f) == 0.0f || std::abs (rel) == 5.0f;
+        const auto col = rel > 0.0f ? (rel >= fullScale - 6.0f ? Theme::levelRed : Theme::levelYellow)
+                                    : Theme::textPrimary.withAlpha (rel == 0.0f ? 1.0f : 0.75f);
+        g.setColour (col);
+        g.drawLine ({ pointAt (a, holdR + 6.0f * s), pointAt (a, holdR + (major ? 12.0f : 9.0f) * s) }, (major ? 1.6f : 1.0f) * s);
+
+        const auto text = rel > 0.0f ? "+" + juce::String (juce::roundToInt (rel)) : juce::String (juce::roundToInt (rel));
+        g.drawText (text, juce::Rectangle<float> (34.0f * s, 16.0f * s).withCentre (pointAt (a, holdR + 22.0f * s)),
+                    juce::Justification::centred);
+    }
+
+    // 0 dBFS marker inside the ring
+    if (fullScale <= scaleMax)
+    {
+        const float a = angleFor (fullScale);
+        g.setColour (Theme::levelRed);
+        g.drawLine ({ pointAt (a, innerR - 2.0f * s), pointAt (a, innerR - 10.0f * s) }, 2.0f * s);
+        g.setFont (Theme::font (juce::jmax (7.0f, 9.5f * s), true));
+        g.drawText ("FS", juce::Rectangle<float> (24.0f * s, 12.0f * s).withCentre (pointAt (a, innerR - 18.0f * s)),
+                    juce::Justification::centred);
+    }
+
+    // --- Centre readouts: peak, average and the crest between them
+    auto readout = juce::Rectangle<float> (innerR * 1.5f, innerR * 1.05f).withCentre (centre.translated (0.0f, innerR * 0.08f));
+    auto fmt = [] (float v) { return v <= scaleMin - 20.0f ? juce::String ("--") : (v > 0.0f ? "+" : "") + juce::String (v, 1); };
+
+    if (labels[i].isNotEmpty())
+    {
+        g.setColour (Theme::arcAccent);
+        g.setFont (Theme::font (juce::jmax (9.0f, 18.0f * s), true));
+        g.drawText (labels[i], readout.removeFromTop (readout.getHeight() * 0.22f), juce::Justification::centred);
+    }
+
+    const float rowH = readout.getHeight() / 3.0f;
+    auto drawRow = [&] (const juce::String& name, const juce::String& value, juce::Colour colour, bool big)
+    {
+        auto row = readout.removeFromTop (rowH);
+        g.setColour (Theme::textSecondary);
+        g.setFont (Theme::font (juce::jmax (7.5f, 11.0f * s), true));
+        g.drawText (name, row.removeFromLeft (row.getWidth() * 0.36f), juce::Justification::centredRight);
+        row.removeFromLeft (8.0f * s);
+        g.setColour (colour);
+        g.setFont (Theme::mono (juce::jmax (9.0f, (big ? 24.0f : 18.0f) * s), true));
+        g.drawText (value, row, juce::Justification::centredLeft);
+    };
+
+    drawRow ("PEAK", fmt (hold[i]), zoneColour (hold[i]).interpolatedWith (juce::Colours::white, 0.25f), true);
+    drawRow ("AVG", fmt (average[i]), zoneColour (average[i]), true);
+    const bool hasCrest = peak[i] > scaleMin - 20.0f && average[i] > scaleMin - 20.0f;
+    drawRow ("P - A", hasCrest ? juce::String (juce::jmax (0.0f, peak[i] - average[i]), 1) + " dB" : juce::String ("--"),
+             Theme::arcAccent, false);
+
+    // --- OVER lamp at the bottom of the arc opening
+    const bool lit = overFrames[i] > 0;
+    auto lamp = juce::Rectangle<float> (46.0f * s, 16.0f * s).withCentre ({ centre.x, centre.y + outerR * 0.86f });
+    if (lit)
+    {
+        g.setColour (Theme::levelRed.withAlpha (0.3f));
+        g.fillRoundedRectangle (lamp.expanded (4.0f * s), 5.0f * s);
+    }
+    g.setColour (lit ? Theme::levelRed : juce::Colour (0xff3a1210));
+    g.fillRoundedRectangle (lamp, 3.0f * s);
+    g.setColour (lit ? juce::Colours::white : juce::Colour (0xff7a3a34));
+    g.setFont (Theme::font (juce::jmax (7.0f, 10.0f * s), true));
+    g.drawText ("OVER", lamp, juce::Justification::centred);
+
+    // Glass reflection
+    juce::Path sheen;
+    sheen.addEllipse (window.getX() - window.getWidth() * 0.2f, window.getY() - window.getHeight() * 0.75f,
+                      window.getWidth() * 1.1f, window.getHeight() * 1.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.035f));
+    g.fillPath (sheen);
+
+    g.setColour (juce::Colours::white.withAlpha (0.28f));
+    g.setFont (Theme::font (juce::jmax (6.5f, 8.0f * s), true));
+    g.drawText ("NEW CONSTELLATION", window.reduced (8.0f * s, 6.0f * s), juce::Justification::bottomRight);
+
+    g.restoreState();
+}

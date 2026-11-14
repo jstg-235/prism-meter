@@ -134,6 +134,58 @@ namespace
     };
 
     //==========================================================================
+    /// Arc LED peak + average, on the mono sum or on L and R.
+    class ArcModule final : public ViewModule<ArcLedMeter>
+    {
+    public:
+        explicit ArcModule (bool isStereo) : stereo (isStereo) {}
+
+        void update (const ModuleContext& c) override
+        {
+            const int refChoice = choiceIndex (c.params, ParamIds::vuReference);
+            if (refChoice != lastChoice)
+            {
+                lastChoice = refChoice;
+                reference = Choices::vuReferenceValues[static_cast<size_t> (refChoice)];
+                view.setFullScale (-reference);
+                view.setReferenceText ("0 = " + Choices::vuReferences[refChoice] + "   peak: instant, falls 13 dB/s   average: RMS 600 ms");
+            }
+
+            const float ceiling = Choices::truePeakCeilingValues[static_cast<size_t> (choiceIndex (c.params, ParamIds::truePeakCeiling))];
+            const int channels = juce::jlimit (1, 2, c.state.numChannels.load());
+
+            if (stereo && channels == 2)
+            {
+                view.setTitle ("Arc Peak + Average  stereo");
+                view.setNumFaces (2);
+                view.setFaceLabel (0, "L");
+                view.setFaceLabel (1, "R");
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    const auto& s = c.state.channels[static_cast<size_t> (ch)];
+                    view.setValues (ch, s.needlePeak.load() - reference, s.needleAverage.load() - reference, s.truePeak.load() > ceiling);
+                }
+            }
+            else
+            {
+                view.setTitle (channels == 2 ? "Arc Peak + Average  mono sum" : "Arc Peak + Average  mono");
+                view.setNumFaces (1);
+                view.setFaceLabel (0, channels == 2 ? "L + R" : "MONO");
+                const bool over = c.state.channels[0].truePeak.load() > ceiling
+                               || (channels == 2 && c.state.channels[1].truePeak.load() > ceiling);
+                view.setValues (0, c.state.monoPeak.load() - reference, c.state.monoAverage.load() - reference, over);
+            }
+
+            view.repaint();
+        }
+
+    private:
+        bool stereo;
+        int lastChoice = -1;
+        float reference = -18.0f;
+    };
+
+    //==========================================================================
     class PeakAverageModule final : public ViewModule<NeedleGauge>
     {
     public:
@@ -267,6 +319,8 @@ namespace
                     case MeterKind::kSystem:
                     case MeterKind::loudness:
                     case MeterKind::peakAverage:
+                    case MeterKind::arcMono:
+                    case MeterKind::arcStereo:
                     case MeterKind::spectrum:
                     case MeterKind::phase:
                     default:             bank.setValue (ch, s.rms.load() - reference); break;
@@ -308,6 +362,8 @@ namespace
                 case MeterKind::kSystem:
                 case MeterKind::loudness:
                 case MeterKind::peakAverage:
+                case MeterKind::arcMono:
+                case MeterKind::arcStereo:
                 case MeterKind::spectrum:
                 case MeterKind::phase:
                 default:
@@ -338,6 +394,8 @@ std::unique_ptr<MeterModule> MeterModule::create (MeterKind kind)
         case MeterKind::ppm:
         case MeterKind::kSystem:     return std::make_unique<BankModule> (kind);
         case MeterKind::radar:       return std::make_unique<RadarModule>();
+        case MeterKind::arcMono:     return std::make_unique<ArcModule> (false);
+        case MeterKind::arcStereo:   return std::make_unique<ArcModule> (true);
     }
     return std::make_unique<LoudnessModule>();
 }
