@@ -108,6 +108,11 @@ namespace DisplayPresets
               { 1.0f }, { 1.0f },
               { { 0, 0, 1, 1, K::peakAverage } } },
 
+            { "wide12-vu", "12\" widescreen: stereo VU", "A pair of large analogue VU meters, L and R.",
+              1280, 720,
+              { 1.0f }, { 1.0f },
+              { { 0, 0, 1, 1, K::vu } } },
+
             { "wide12-split", "12\" widescreen: two views", "Two meters side by side.",
               1280, 720,
               { 1.0f, 1.0f }, { 1.0f },

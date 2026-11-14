@@ -41,6 +41,7 @@ meter it shows. The layout and slot choices are saved with the session.
 | --- | --- | --- |
 | Console (full) | 1280 x 780 | Loudness, Peak + Average, Spectrum, Phase, VU, PPM, K-System |
 | 12" widescreen: stereo Peak + Average | 1280 x 720 | One stereo dual-needle meter, L and R side by side |
+| 12" widescreen: stereo VU | 1280 x 720 | Two analogue VU meters, L and R, with peak lamps |
 | 12" widescreen: two views | 1280 x 720 | Peak + Average, Loudness |
 | 14" 4:3: four views (2 x 2) | 1024 x 768 | Loudness, Spectrum, Peak + Average, Phase |
 | Ultrawide bar display: four views | 1920 x 720 | VU, PPM, Loudness, Spectrum |
@@ -54,6 +55,8 @@ weights plus slots that can span cells), so adding one is a few lines.
 | --- | --- |
 | ![12" stereo](docs/images/presets/wide12-stereo.png) | ![14" quad](docs/images/presets/classic14-quad.png) |
 | ![12" split](docs/images/presets/wide12-split.png) | ![7" loudness](docs/images/presets/small7-loudness.png) |
+
+![12" stereo VU](docs/images/presets/wide12-vu.png)
 
 ![Ultrawide](docs/images/presets/ultrawide-strip.png)
 

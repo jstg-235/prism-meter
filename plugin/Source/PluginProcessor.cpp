@@ -57,6 +57,9 @@ void PrismMeterProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         needles[i].prepare (sampleRate);
     }
 
+    peakHoldSamples = static_cast<int> (sampleRate * 0.3);
+    recentPeakGain.fill (0.0f);
+    recentPeakAge.fill (0);
     lastPpmType = -1;
     monoScratch.assign (static_cast<size_t> (juce::jmax (1, samplesPerBlock)), 0.0f);
     spectrumFifo.reset();
@@ -100,6 +103,14 @@ void PrismMeterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     {
         const auto i = static_cast<size_t> (ch);
         truePeak[i].process (channels[ch], numSamples);
+
+        const auto blockPeak = static_cast<float> (truePeak[i].getBlockTruePeak());
+        recentPeakAge[i] += numSamples;
+        if (blockPeak >= recentPeakGain[i] || recentPeakAge[i] > peakHoldSamples)
+        {
+            recentPeakGain[i] = blockPeak;
+            recentPeakAge[i] = 0;
+        }
         vu[i].process (channels[ch], numSamples);
         ppm[i].process (channels[ch], numSamples);
         rms[i].process (channels[ch], numSamples);
@@ -135,7 +146,7 @@ void PrismMeterProcessor::publishReadings (int numChannels) noexcept
         c.rms.store (static_cast<float> (rms[i].getReadingDbfs()));
         c.needlePeak.store (static_cast<float> (needles[i].getPeakDbfs()));
         c.needleAverage.store (static_cast<float> (needles[i].getAverageDbfs()));
-        c.truePeak.store (static_cast<float> (prism::gainToDb (truePeak[i].getBlockTruePeak())));
+        c.truePeak.store (static_cast<float> (prism::gainToDb (recentPeakGain[i])));
         tpMax = juce::jmax (tpMax, truePeak[i].getTruePeak());
         spMax = juce::jmax (spMax, truePeak[i].getSamplePeak());
     }

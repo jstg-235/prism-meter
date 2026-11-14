@@ -30,7 +30,7 @@ struct MeterState
         std::atomic<float> rms { -150.0f };       // dBFS, AES17
         std::atomic<float> needlePeak { -150.0f };
         std::atomic<float> needleAverage { -150.0f };
-        std::atomic<float> truePeak { -150.0f };  // dBTP, most recent block
+        std::atomic<float> truePeak { -150.0f };  // dBTP, highest in the last 0.3 s
     };
 
     std::array<Channel, maxMeterChannels> channels;

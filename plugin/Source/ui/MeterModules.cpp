@@ -116,6 +116,79 @@ namespace
     };
 
     //==========================================================================
+    /// Analogue VU faces when the slot is roomy enough, LED bars on a VU
+    /// scale in narrow slots (console columns, strips).
+    class VuModule final : public MeterModule
+    {
+    public:
+        VuModule()
+        {
+            bars.setBarLabel (0, "L");
+            bars.setBarLabel (1, "R");
+            bars.setScale ({ -20.0f, 3.0f, 0.0f, 1.0f, { -20.0f, -10.0f, -7.0f, -5.0f, -3.0f, -1.0f, 0.0f, 1.0f, 3.0f }, "VU" });
+            addChildComponent (dials);
+            addChildComponent (bars);
+        }
+
+        void resized() override
+        {
+            dials.setBounds (getLocalBounds());
+            bars.setBounds (getLocalBounds());
+            chooseView();
+        }
+
+        void update (const ModuleContext& c) override
+        {
+            const int refChoice = choiceIndex (c.params, ParamIds::vuReference);
+            if (refChoice != lastChoice)
+            {
+                lastChoice = refChoice;
+                reference = Choices::vuReferenceValues[static_cast<size_t> (refChoice)];
+                const auto title = "VU  " + Choices::vuReferences[refChoice];
+                dials.setTitle (title);
+                bars.setTitle (title);
+            }
+
+            const float ceiling = Choices::truePeakCeilingValues[static_cast<size_t> (choiceIndex (c.params, ParamIds::truePeakCeiling))];
+            const int channels = juce::jlimit (1, 2, c.state.numChannels.load());
+            if (channels != numChannels)
+            {
+                numChannels = channels;
+                dials.setNumChannels (channels);
+                bars.setNumBarsVisible (channels);
+                chooseView();
+            }
+
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                const auto& s = c.state.channels[static_cast<size_t> (ch)];
+                const float vu = s.vu.load() - reference;
+                dials.setValue (ch, vu, s.truePeak.load() > ceiling);
+                bars.setValue (ch, vu);
+            }
+
+            if (dials.isVisible())
+                dials.repaint();
+            else
+                bars.repaint();
+        }
+
+    private:
+        void chooseView()
+        {
+            const bool roomy = AnalogVuMeter::meterHeightFor (getWidth(), getHeight(), numChannels) >= 150.0f;
+            dials.setVisible (roomy);
+            bars.setVisible (! roomy);
+        }
+
+        AnalogVuMeter dials;
+        BarMeterBank bars { "VU", Theme::vuAccent, 2 };
+        int lastChoice = -1;
+        int numChannels = 2;
+        float reference = -18.0f;
+    };
+
+    //==========================================================================
     class BankModule final : public MeterModule
     {
     public:
@@ -215,7 +288,7 @@ std::unique_ptr<MeterModule> MeterModule::create (MeterKind kind)
         case MeterKind::peakAverage: return std::make_unique<PeakAverageModule>();
         case MeterKind::spectrum:    return std::make_unique<SpectrumModule>();
         case MeterKind::phase:       return std::make_unique<PhaseModule>();
-        case MeterKind::vu:
+        case MeterKind::vu:          return std::make_unique<VuModule>();
         case MeterKind::ppm:
         case MeterKind::kSystem:     return std::make_unique<BankModule> (kind);
     }
