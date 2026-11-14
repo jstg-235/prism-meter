@@ -89,12 +89,19 @@ void BarMeterBank::paint (juce::Graphics& g)
         g.drawHorizontalLine (juce::roundToInt (y), area.getX(), area.getX() + 3.0f);
     }
 
-    constexpr float segmentPitch = 4.0f; // 3 px lit + 1 px gap
+    constexpr float segmentPitch = 5.0f; // 4 px lit + 1 px gap
     const int numSegments = juce::jmax (8, static_cast<int> (meterArea.getHeight() / segmentPitch));
     const float pitch = meterArea.getHeight() / static_cast<float> (numSegments);
-    const float gap = 5.0f;
+    const float gap = 6.0f;
     const float barWidth = (meterArea.getWidth() - gap * static_cast<float> (visibleBars - 1)) / static_cast<float> (visibleBars);
     const float range = scale.maxValue - scale.minValue;
+
+    // Reference line at the start of the warn zone (0 VU, alignment, K zero).
+    {
+        const float y = meterArea.getBottom() - toNorm (scale.warnFrom) * meterArea.getHeight();
+        g.setColour (accent.withAlpha (0.55f));
+        g.drawHorizontalLine (juce::roundToInt (y), area.getX(), area.getRight());
+    }
 
     for (int b = 0; b < visibleBars; ++b)
     {
@@ -103,17 +110,45 @@ void BarMeterBank::paint (juce::Graphics& g)
         const int litSegments = juce::roundToInt (toNorm (values[i]) * static_cast<float> (numSegments));
         const int holdSegment = juce::jlimit (0, numSegments - 1, juce::roundToInt (toNorm (holds[i]) * static_cast<float> (numSegments)) - 1);
 
+        // Soft glow behind the lit column, like light bleeding through a diffuser.
+        if (litSegments > 0)
+        {
+            const float top = meterArea.getBottom() - static_cast<float> (litSegments) * pitch;
+            const float topValue = scale.minValue + static_cast<float> (litSegments) / static_cast<float> (numSegments) * range;
+            g.setColour (zoneColour (topValue).withAlpha (0.10f));
+            g.fillRoundedRectangle (juce::Rectangle<float>::leftTopRightBottom (x - 3.0f, top - 3.0f, x + barWidth + 3.0f, meterArea.getBottom() + 1.0f), 3.0f);
+        }
+
         for (int s = 0; s < numSegments; ++s)
         {
             const float segValue = scale.minValue + (static_cast<float> (s) + 0.5f) / static_cast<float> (numSegments) * range;
             const auto colour = zoneColour (segValue);
             const bool lit = s < litSegments;
             const bool isHold = s == holdSegment && holds[i] > scale.minValue;
-
-            g.setColour (lit || isHold ? colour : colour.withAlpha (0.10f));
             const float y = meterArea.getBottom() - static_cast<float> (s + 1) * pitch;
-            g.fillRect (x, y + 0.5f, barWidth, pitch - 1.0f);
+            const auto seg = juce::Rectangle<float> (x, y + 0.5f, barWidth, pitch - 1.0f);
+
+            if (lit || isHold)
+            {
+                // Lit LED: brighter centre, darker edges.
+                const auto core = isHold ? colour.brighter (0.7f) : colour.brighter (0.15f);
+                juce::ColourGradient grad (colour.darker (0.35f), seg.getX(), 0.0f, colour.darker (0.35f), seg.getRight(), 0.0f, false);
+                grad.addColour (0.5, core);
+                g.setGradientFill (grad);
+                g.fillRoundedRectangle (seg, 1.0f);
+            }
+            else
+            {
+                g.setColour (colour.withAlpha (0.07f));
+                g.fillRoundedRectangle (seg, 1.0f);
+            }
         }
+    }
+
+    for (int b = 0; b < visibleBars; ++b)
+    {
+        const auto i = static_cast<size_t> (b);
+        const float x = meterArea.getX() + static_cast<float> (b) * (barWidth + gap);
 
         // Per-bar peak-hold readout
         const auto box = readoutRow.withX (x).withWidth (barWidth);
@@ -425,6 +460,272 @@ void NeedleGauge::drawDial (juce::Graphics& g, juce::Rectangle<float> area, floa
     g.drawText ("AVG " + Theme::formatDb (averageDb), legend, juce::Justification::centred);
     g.setColour (Theme::textSecondary);
     g.drawText ("CREST " + juce::String (crest, 1), legend, juce::Justification::right);
+}
+
+//==============================================================================
+float AnalogVuMeter::needlePosition (float vu) noexcept
+{
+    // VU scales are linear in voltage: -20 VU is 0.1 of the 0 VU voltage.
+    const float lo = 0.1f;
+    const float hi = std::pow (10.0f, 3.0f / 20.0f);
+    const float v = std::pow (10.0f, juce::jlimit (-60.0f, 6.0f, vu) / 20.0f);
+    return juce::jlimit (-0.03f, 1.04f, (v - lo) / (hi - lo));
+}
+
+float AnalogVuMeter::meterHeightFor (int width, int height, int channels) noexcept
+{
+    constexpr float aspect = 1.45f, gap = 12.0f;
+    const float w = static_cast<float> (width) - 20.0f;
+    const float h = static_cast<float> (height) - Theme::titleHeight - 20.0f;
+    if (channels < 2)
+        return juce::jmin (h, w / aspect);
+    return juce::jmax (juce::jmin (h, (w - gap) * 0.5f / aspect), juce::jmin ((h - gap) * 0.5f, w / aspect));
+}
+
+void AnalogVuMeter::setTitle (juce::String newTitle)
+{
+    if (newTitle != title)
+    {
+        title = std::move (newTitle);
+        repaint();
+    }
+}
+
+void AnalogVuMeter::setNumChannels (int n)
+{
+    numChannels = juce::jlimit (1, 2, n);
+}
+
+void AnalogVuMeter::setValue (int channel, float vu, bool peakOver)
+{
+    if (! juce::isPositiveAndBelow (channel, 2))
+        return;
+
+    const auto i = static_cast<size_t> (channel);
+    values[i] = vu;
+    // The lamp stays lit for half a second after an over, like a hardware lamp.
+    lampFrames[i] = peakOver ? 15 : juce::jmax (0, lampFrames[i] - 1);
+}
+
+void AnalogVuMeter::paint (juce::Graphics& g)
+{
+    auto area = Theme::drawPanel (g, getLocalBounds().toFloat(), title, Theme::vuAccent).reduced (10.0f);
+
+    constexpr float aspect = 1.45f; // width / height of one meter
+    constexpr float gap = 12.0f;
+
+    if (numChannels < 2)
+    {
+        drawMeter (g, area, 0, {});
+        return;
+    }
+
+    // Side by side or stacked, whichever gives the bigger meters.
+    const float sideH = juce::jmin (area.getHeight(), (area.getWidth() - gap) * 0.5f / aspect);
+    const float stackH = juce::jmin ((area.getHeight() - gap) * 0.5f, area.getWidth() / aspect);
+
+    if (sideH >= stackH)
+    {
+        auto left = area.removeFromLeft ((area.getWidth() - gap) * 0.5f);
+        area.removeFromLeft (gap);
+        drawMeter (g, left, 0, "L");
+        drawMeter (g, area, 1, "R");
+    }
+    else
+    {
+        auto top = area.removeFromTop ((area.getHeight() - gap) * 0.5f);
+        area.removeFromTop (gap);
+        drawMeter (g, top, 0, "L");
+        drawMeter (g, area, 1, "R");
+    }
+}
+
+void AnalogVuMeter::drawMeter (juce::Graphics& g, juce::Rectangle<float> area, int channel, const juce::String& label) const
+{
+    constexpr float aspect = 1.45f;
+    const float h = juce::jmin (area.getHeight(), area.getWidth() / aspect);
+    auto bezel = area.withSizeKeepingCentre (h * aspect, h);
+    const float s = juce::jlimit (0.55f, 2.4f, h / 260.0f); // type and line scale
+
+    // --- Bezel: brushed dark metal with a bevel
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a3d42), bezel.getX(), bezel.getY(),
+                                             juce::Colour (0xff141518), bezel.getX(), bezel.getBottom(), false));
+    g.fillRoundedRectangle (bezel, 8.0f * s);
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    g.drawRoundedRectangle (bezel.reduced (1.0f), 8.0f * s, 1.0f);
+    g.setColour (juce::Colours::black);
+    g.drawRoundedRectangle (bezel, 8.0f * s, 1.2f);
+
+    const float lip = juce::jmax (6.0f, 11.0f * s);
+    auto inner = bezel.reduced (lip);
+    auto readoutStrip = inner.removeFromBottom (juce::jmax (14.0f, 22.0f * s));
+    inner.removeFromBottom (lip * 0.5f);
+    auto window = inner;
+
+    // --- Backlit face: warm, brightest where the lamp sits behind the scale
+    g.saveState();
+    juce::Path windowPath;
+    windowPath.addRoundedRectangle (window, 4.0f * s);
+    g.reduceClipRegion (windowPath);
+
+    const auto faceWarm = juce::Colour (0xfff7e3a6);
+    const auto faceEdge = juce::Colour (0xffd9a94e);
+    juce::ColourGradient glow (faceWarm.brighter (0.08f), window.getCentreX(), window.getY() + window.getHeight() * 0.55f,
+                               faceEdge, window.getX(), window.getY(), true);
+    g.setGradientFill (glow);
+    g.fillRect (window);
+
+    const auto ink = juce::Colour (0xff1c140a);
+    const auto red = juce::Colour (0xffc3241b);
+
+    const juce::Point<float> pivot (window.getCentreX(), window.getBottom() + window.getHeight() * 0.20f);
+    const float radius = window.getHeight() * 0.92f;
+    constexpr float span = juce::MathConstants<float>::pi * 0.25f; // +/- 45 degrees
+
+    auto angleFor = [&] (float vu) { return -span + needlePosition (vu) * 2.0f * span; };
+    auto pointAt = [&] (float angle, float r)
+    {
+        return pivot + juce::Point<float> (std::sin (angle) * r, -std::cos (angle) * r);
+    };
+
+    // Main scale arc, then the red band from 0 to +3 VU
+    juce::Path arc;
+    arc.addCentredArc (pivot.x, pivot.y, radius, radius, 0.0f, angleFor (-20.0f), angleFor (0.0f), true);
+    g.setColour (ink);
+    g.strokePath (arc, juce::PathStrokeType (1.6f * s));
+
+    juce::Path redBand;
+    const float bandR = radius + 4.0f * s;
+    redBand.addCentredArc (pivot.x, pivot.y, bandR, bandR, 0.0f, angleFor (0.0f), angleFor (3.0f), true);
+    g.setColour (red);
+    g.strokePath (redBand, juce::PathStrokeType (8.0f * s, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
+
+    // Ticks: majors are numbered, minors fill the gaps
+    struct Mark { float vu; bool numbered; };
+    static const Mark marks[] = {
+        { -20.0f, true }, { -15.0f, false }, { -10.0f, true }, { -8.0f, false }, { -7.0f, true }, { -6.0f, false },
+        { -5.0f, true }, { -4.0f, false }, { -3.0f, true }, { -2.0f, true }, { -1.0f, true }, { -0.5f, false },
+        { 0.0f, true }, { 0.5f, false }, { 1.0f, true }, { 1.5f, false }, { 2.0f, true }, { 2.5f, false }, { 3.0f, true }
+    };
+
+    g.setFont (Theme::font (14.0f * s, true));
+    for (const auto& m : marks)
+    {
+        const float a = angleFor (m.vu);
+        const bool hot = m.vu > 0.0f;
+        g.setColour (hot ? red : ink);
+        const float len = (m.numbered ? 12.0f : 7.0f) * s;
+        g.drawLine ({ pointAt (a, radius), pointAt (a, radius + len) }, (m.numbered ? 1.6f : 1.0f) * s);
+
+        if (m.numbered)
+        {
+            const auto text = m.vu > 0.0f ? "+" + juce::String (juce::roundToInt (m.vu))
+                                          : juce::String (juce::roundToInt (std::abs (m.vu)));
+            g.drawText (text, juce::Rectangle<float> (30.0f * s, 16.0f * s).withCentre (pointAt (a, radius + 24.0f * s)),
+                        juce::Justification::centred);
+        }
+    }
+
+    // "-" and "+" end markers, out of the way of the numbers
+    g.setFont (Theme::font (18.0f * s, true));
+    g.setColour (ink);
+    g.drawText ("-", juce::Rectangle<float> (20.0f * s, 20.0f * s).withCentre (pointAt (angleFor (-20.0f) - 0.10f, radius + 6.0f * s)),
+                juce::Justification::centred);
+    g.setColour (red);
+    g.drawText ("+", juce::Rectangle<float> (20.0f * s, 20.0f * s).withCentre (pointAt (angleFor (3.0f) + 0.10f, radius + 6.0f * s)),
+                juce::Justification::centred);
+
+    // Secondary percent scale inside the arc (100 % = 0 VU)
+    const float pctR = radius - 14.0f * s;
+    juce::Path pctArc;
+    pctArc.addCentredArc (pivot.x, pivot.y, pctR, pctR, 0.0f, angleFor (-20.0f), angleFor (0.0f), true);
+    g.setColour (ink.withAlpha (0.55f));
+    g.strokePath (pctArc, juce::PathStrokeType (0.9f * s));
+    g.setFont (Theme::font (9.5f * s));
+    for (int pct : { 20, 40, 60, 80, 100 })
+    {
+        const float vu = 20.0f * std::log10 (static_cast<float> (pct) / 100.0f);
+        const float a = angleFor (vu);
+        g.drawLine ({ pointAt (a, pctR), pointAt (a, pctR - 5.0f * s) }, 0.9f * s);
+        g.drawText (juce::String (pct), juce::Rectangle<float> (26.0f * s, 12.0f * s).withCentre (pointAt (a, pctR - 13.0f * s)),
+                    juce::Justification::centred);
+    }
+
+    // Legend
+    g.setColour (ink.withAlpha (0.85f));
+    g.setFont (Theme::font (26.0f * s, true));
+    g.drawText ("VU", juce::Rectangle<float> (80.0f * s, 30.0f * s).withCentre ({ pivot.x, window.getBottom() - window.getHeight() * 0.30f }),
+                juce::Justification::centred);
+
+    g.setFont (Theme::font (8.5f * s, true));
+    g.setColour (ink.withAlpha (0.5f));
+    g.drawText ("NEW CONSTELLATION", window.reduced (8.0f * s, 6.0f * s), juce::Justification::bottomRight);
+
+    if (label.isNotEmpty())
+    {
+        g.setColour (ink.withAlpha (0.8f));
+        g.setFont (Theme::font (16.0f * s, true));
+        g.drawText (label, window.reduced (9.0f * s, 5.0f * s), juce::Justification::bottomLeft);
+    }
+
+    // PEAK lamp, top left
+    const auto idx = static_cast<size_t> (channel);
+    const bool lit = lampFrames[idx] > 0;
+    const auto lamp = juce::Rectangle<float> (10.0f * s, 10.0f * s).withPosition (window.getX() + 10.0f * s, window.getY() + 10.0f * s);
+    if (lit)
+    {
+        g.setColour (juce::Colour (0xffff3020).withAlpha (0.35f));
+        g.fillEllipse (lamp.expanded (5.0f * s));
+    }
+    g.setColour (lit ? juce::Colour (0xffff4a30) : juce::Colour (0xff5a1a12));
+    g.fillEllipse (lamp);
+    g.setColour (ink.withAlpha (0.6f));
+    g.drawEllipse (lamp, 1.0f);
+    g.setFont (Theme::font (9.0f * s, true));
+    g.setColour (ink.withAlpha (0.75f));
+    g.drawText ("PEAK", juce::Rectangle<float> (lamp.getRight() + 4.0f * s, lamp.getY() - 2.0f * s, 40.0f * s, lamp.getHeight() + 4.0f * s),
+                juce::Justification::centredLeft);
+
+    // Needle with a soft shadow on the face
+    const float vu = values[idx];
+    const float a = angleFor (vu);
+    const auto tip = pointAt (a, radius + 10.0f * s);
+    const auto shadowOffset = juce::Point<float> (2.5f * s, 3.0f * s);
+    g.setColour (juce::Colours::black.withAlpha (0.22f));
+    g.drawLine ({ pivot + shadowOffset, tip + shadowOffset }, 2.2f * s);
+    g.setColour (juce::Colour (0xff111111));
+    g.drawLine ({ pivot, tip }, 1.8f * s);
+
+    // Mechanism cover across the bottom of the window hides the pivot
+    const float coverR = window.getHeight() * 0.36f;
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2b2d31), pivot.x, pivot.y - coverR,
+                                             juce::Colour (0xff121315), pivot.x, pivot.y, false));
+    g.fillEllipse (juce::Rectangle<float> (coverR * 2.0f, coverR * 2.0f).withCentre (pivot));
+    g.setColour (juce::Colours::white.withAlpha (0.08f));
+    g.drawEllipse (juce::Rectangle<float> (coverR * 2.0f, coverR * 2.0f).withCentre (pivot), 1.0f);
+
+    // Glass: a soft top shadow and a diagonal glare
+    g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.30f), window.getX(), window.getY(),
+                                             juce::Colours::transparentBlack, window.getX(), window.getY() + 14.0f * s, false));
+    g.fillRect (window);
+    juce::Path glare;
+    glare.startNewSubPath (window.getX(), window.getY());
+    glare.lineTo (window.getX() + window.getWidth() * 0.62f, window.getY());
+    glare.lineTo (window.getX() + window.getWidth() * 0.30f, window.getBottom());
+    glare.lineTo (window.getX(), window.getBottom());
+    glare.closeSubPath();
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.16f), window.getX(), window.getY(),
+                                             juce::Colours::white.withAlpha (0.0f), window.getCentreX(), window.getBottom(), false));
+    g.fillPath (glare);
+
+    g.restoreState();
+
+    // Numeric reading in the bezel under the window
+    g.setColour (Theme::face);
+    g.fillRoundedRectangle (readoutStrip.withSizeKeepingCentre (juce::jmin (readoutStrip.getWidth(), 120.0f * s), readoutStrip.getHeight()), 3.0f);
+    g.setFont (Theme::mono (juce::jmax (10.0f, 14.0f * s), true));
+    g.setColour (vu > 0.0f ? Theme::levelRed : Theme::vuAccent);
+    g.drawText ((vu <= -40.0f ? juce::String ("-inf") : juce::String (vu, 1)) + " VU", readoutStrip, juce::Justification::centred);
 }
 
 //==============================================================================
